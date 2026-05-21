@@ -1,2 +1,5 @@
-words = ["dav"]
+words = [
+    "dav",
+    "mkdir",
+]
 ignore_paths = ["ffi_tests/build.rs"]
