@@ -1,0 +1,13 @@
+[package]
+name = "ffi-tests"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+# Сборка динамической библиотеки в build.rs приводит к вечной блокировке
+# Поэтому там лишь указываем путь до собранной библиотеки
+build = "build.rs"
+
+[dependencies]
+eyre.workspace = true

@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+
+members = ["driver/local", "ffi_tests"]
+
+default-members = ["driver/local"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["VMM <vladimirov.m.m@mail.ru>"]
+publish = false
+
+[workspace.dependencies]
+fs4me-local.path = "./driver/local"
+eyre="0.6"
+rand="0.8"
