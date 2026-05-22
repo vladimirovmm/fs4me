@@ -9,5 +9,6 @@ publish.workspace = true
 # Поэтому там лишь указываем путь до собранной библиотеки
 build = "build.rs"
 
-[dependencies]
+[dev-dependencies]
 eyre.workspace = true
+chrono.workspace = true
