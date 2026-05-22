@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["driver/local", "ffi_tests"]
+members = ["driver/local", "ffi_tests", "interface"]
 
 default-members = ["driver/local"]
 
@@ -13,6 +13,7 @@ publish = false
 
 [workspace.dependencies]
 fs4me-local.path = "./driver/local"
+fs4me-interface.path = "./interface"
 
 eyre="0.6.12"
 rand="0.10.1"
