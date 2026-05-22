@@ -116,14 +116,10 @@ fn test_server_time() {
         "Текущее время сервера: \n\
         Время UTC: {}\n\
         Локальное время: {}",
-        server_time
-            .with_timezone(&Utc)
-            .format("%d.%m.%Y %H:%M:%S")
-            .to_string(),
+        server_time.with_timezone(&Utc).format("%d.%m.%Y %H:%M:%S"),
         server_time
             .with_timezone(&Local)
             .format("%d.%m.%Y %H:%M:%S")
-            .to_string()
     );
 
     // Отключение
