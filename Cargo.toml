@@ -6,7 +6,7 @@ members = ["driver/local", "ffi_tests", "interface"]
 default-members = ["driver/local"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["VMM <vladimirov.m.m@mail.ru>"]
 publish = false

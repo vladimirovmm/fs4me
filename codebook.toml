@@ -4,4 +4,3 @@ words = [
     "lossy",
     "mkdir",
 ]
-ignore_paths = ["ffi_tests/build.rs"]
