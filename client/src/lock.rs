@@ -105,12 +105,18 @@ pub(crate) fn is_locked<D: Driver, P: AsRef<Path>>(
     }
 }
 
+/// Информация о блокировке файла.
+/// Хранит информацию о читателях, писателях и очереди на запись.
 #[derive(Debug, Default, Clone)]
 pub struct LockStat {
     /// Карта читателей: uuid -> unixtime блокировки
     read: HashMap<FsUuid, u32>,
+
     /// Карта писателей: uuid -> unixtime блокировки
     write: Option<(FsUuid, u32)>,
+
+    /// Очередь на запись: список uuid ожидающих блокировки.
+    write_queue: Vec<(FsUuid, u32)>,
 }
 
 /// Преобразует текс в структуру `LockStat`.
@@ -221,16 +227,15 @@ impl LockStat {
         let client_uuid = &fs.uuid;
 
         // Проверка на наличие исключительной блокировки на запись у другого клиента.
-        let has_exclusive_write = self.write.iter().any(|(uuid, _)| uuid != client_uuid);
-        if has_exclusive_write {
-            // При записи только эксклюзивный доступ. Для других клиентов обращение запрещено.
+        if let Some((uuid, _)) = &self.write
+            && uuid != client_uuid
+        {
             return true;
-        } else if matches!(mode, LockMode::Read) {
-            // Допускается параллельное чтение
-            return false;
         }
 
-        // Нельзя начать запись если есть читатели этого файла
-        self.read.iter().any(|(uuid, _)| uuid != client_uuid)
+        match mode {
+            LockMode::Read => !self.write_queue.is_empty(), // Нельзя читать, если есть ожидающие записи
+            LockMode::Write => self.write.is_some() && !self.read.is_empty(), // Нельзя писать, если есть писатели или читатели
+        }
     }
 }
