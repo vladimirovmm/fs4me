@@ -10,7 +10,11 @@ pub(crate) mod lock;
 pub(crate) mod trash;
 pub(crate) mod uuid;
 
-use crate::{trash::trash_unique_path, uuid::FsUuid};
+use crate::{
+    lock::{LockMode, is_locked},
+    trash::trash_unique_path,
+    uuid::FsUuid,
+};
 
 /// Обёртка для драйвера для безопасного доступа к файловой системе.
 /// Обёртка обеспечивает безопасный одновременный доступ к файлу через lock файл.
@@ -87,12 +91,20 @@ impl<D: Driver> Fs<D> {
     }
 
     /// Перемещает/переименовывает файл/директорию.
+    /// Можно перемещать/переименовывать только если у файла/директории нет читателя или писателя
     ///
     /// @param from - Исходный путь.
     /// @param to - Целевой путь.
     /// @return Result<()> - Результат: успех или ошибка
     pub fn mv<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), DriverError> {
-        // @todo проверить на наличеие lock файла.
+        let to = to.as_ref();
+
+        if is_locked(self, to, LockMode::Write)? {
+            return Err(DriverError::LockedForWriteError {
+                path: to.to_path_buf(),
+                reason: "Путь заблокирован для перемещения".to_string(),
+            });
+        }
 
         self.driver.mv(from, to)
     }

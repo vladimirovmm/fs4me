@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::format,
+    fmt::Display,
     io,
     path::{Path, PathBuf},
     str::FromStr,
@@ -8,11 +8,35 @@ use std::{
 
 use fs4me_interface::{Driver, DriverError};
 
-use crate::Fs;
+use crate::{Fs, uuid::FsUuid};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LockMode {
     Read,
     Write,
+}
+
+impl FromStr for LockMode {
+    type Err = DriverError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read" => Ok(LockMode::Read),
+            "write" => Ok(LockMode::Write),
+            _ => Err(DriverError::ParseLockError {
+                reason: format!("Некорректный формат режима блокировки: {s}"),
+            }),
+        }
+    }
+}
+
+impl Display for LockMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LockMode::Read => write!(f, "read"),
+            LockMode::Write => write!(f, "write"),
+        }
+    }
 }
 
 /// Получить путь к файлу блокировки для указанного пути.
@@ -38,6 +62,11 @@ fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     Ok(parent.join(new_file_name))
 }
 
+/// Читает файл блокировки и возвращает информацию о блокировке.
+///
+/// @param fs Файловая система.
+/// @param path Путь к файлу.
+/// @return Результат: информации о блокировке или None, если файл блокировки не существует.
 fn read_lock_stat<D: Driver, P: AsRef<Path>>(
     fs: &Fs<D>,
     path: P,
@@ -52,7 +81,10 @@ fn read_lock_stat<D: Driver, P: AsRef<Path>>(
             path: lock_file.to_path_buf(),
             reason: err.to_string(),
         })?;
-    // let lock_stat = LockStat::from_string(&lock_content)?;
+    let mut lock_stat = LockStat::from_str(&lock_content)?;
+    let now = fs.time()?;
+    lock_stat.remove_stale(now);
+
     Ok(Some(lock_stat))
 }
 
@@ -68,31 +100,128 @@ pub(crate) fn is_locked<D: Driver, P: AsRef<Path>>(
     mode: LockMode,
 ) -> Result<bool, DriverError> {
     match read_lock_stat(fs, path)? {
-        Some(stat) => {
-            todo!()
-        }
+        Some(stat) => Ok(stat.is_locked(fs, mode)),
         None => Ok(false),
     }
 }
 
-/// Содержимое файла блокировки.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LockStat {
-    /// Список читателей.
-    /// Ключ — идентификатор читателя, значение — время блокировки файла. Время берётся с сервера.
-    read: HashMap<u64, u32>,
-    /// Блокировка на запись.
-    /// Ключ — идентификатор писателя, значение — время блокировки файла. Время берётся с сервера.
-    write: Option<(u64, u32)>,
+    /// Карта читателей: uuid -> unixtime блокировки
+    read: HashMap<FsUuid, u32>,
+    /// Карта писателей: uuid -> unixtime блокировки
+    write: HashMap<FsUuid, u32>,
 }
-/// Ожидатеся формат строки ввиде
-/// uuid=unixtime=mode
+
+/// Преобразует текс в структуру `LockStat`.
 ///
-/// Например: `0000000000001=1620000000=read`
+/// Ожидается содержимое текста блокировки.
+/// Каждая строка в файле — это отдельный читатель или писатель.
+///
+/// Формат строки:
+/// FsUuid=unixtime=mode
+///
+/// Пример файла:
+/// 12345_1=1620000000=read
+/// 23456_2=1620000000=read
+/// 34567_1=1620000000=write
 impl FromStr for LockStat {
     type Err = DriverError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        todo!()
+        let mut stat = LockStat::default();
+        for line in s.lines() {
+            let Some((uuid, unixtime, mode)) = LockStat::parse_line(line)? else {
+                continue;
+            };
+            match mode {
+                LockMode::Read => stat.read.insert(uuid, unixtime),
+                LockMode::Write => stat.write.insert(uuid, unixtime),
+            };
+        }
+        Ok(stat)
+    }
+}
+
+impl LockStat {
+    /// Парсит строку одной записи.
+    ///
+    /// @param line Строка для парсинга.
+    /// @return Опциональная кортеж `(uuid, unixtime, mode)`, если строка была успешно распаршена.
+    fn parse_line(line: &str) -> Result<Option<(FsUuid, u32, LockMode)>, DriverError> {
+        let line = line.trim();
+        if line.is_empty() {
+            return Ok(None);
+        }
+
+        let parts: Vec<&str> = line.split('=').collect();
+        if parts.len() != 3 {
+            return Err(DriverError::ParseLockError {
+                reason: format!("Неправильный формат строки: {line}"),
+            });
+        }
+
+        let uuid: FsUuid = parts[0]
+            .parse::<FsUuid>()
+            .map_err(|e| DriverError::ParseLockError {
+                reason: format!("Неверный формат UUID в строке: {line}. {e}"),
+            })?;
+        let unixtime = parts[1]
+            .parse::<u32>()
+            .map_err(|e| DriverError::ParseLockError {
+                reason: format!("Неверный формат unixtime в строке: {line}. {e}"),
+            })?;
+        let mode = LockMode::from_str(parts[2])?;
+
+        Ok(Some((uuid, unixtime, mode)))
+    }
+
+    /// Формирует строковое представление файла блокировки.
+    ///
+    /// Каждая строка: uuid=unixtime=mode
+    fn to_string(&self) -> String {
+        let mut result = String::new();
+
+        // Добавляем читателей
+        for (uuid, unixtime) in &self.read {
+            result.push_str(&format!("{}={}={}\n", uuid, unixtime, LockMode::Read));
+        }
+
+        // Добавляем писателей
+        for (uuid, unixtime) in &self.write {
+            result.push_str(&format!("{}={}={}\n", uuid, unixtime, LockMode::Write));
+        }
+
+        result
+    }
+
+    /// Удалить устаревшие блокировки (unixtime + 5 минут < now).
+    ///
+    /// @param now Текущее unixtime на сервере
+    fn remove_stale(&mut self, now: u32) {
+        let stale_time = now.saturating_sub(5 * 60);
+        self.read.retain(|_, unixtime| *unixtime > stale_time);
+        self.write.retain(|_, unixtime| *unixtime > stale_time);
+    }
+
+    /// Проверить, заблокирован ли файл для чтения или записи.
+    ///
+    /// @param fs Файловая система, для которой проверяется блокировка
+    /// @param mode Режим блокировки (чтение или запись)
+    fn is_locked<D: Driver>(&self, fs: &Fs<D>, mode: LockMode) -> bool {
+        let client_uuid = &fs.uuid;
+
+        // Проверка на наличие исключительной блокировки на запись у другого клиента.
+        let has_exclusive_write = self.write.iter().any(|(uuid, _)| uuid != client_uuid);
+        if has_exclusive_write {
+            // При записи только эксклюзивный доступ. Для других клиентов обращение запрещено.
+            return true;
+        } else if matches!(mode, LockMode::Read) {
+            // Допускается параллельное чтение
+            return false;
+        }
+
+        // Нельзя начать запись если есть читатели этого файла
+        self.read.iter().any(|(uuid, _)| uuid != client_uuid)
     }
 }

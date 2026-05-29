@@ -53,4 +53,13 @@ pub enum DriverError {
 
     #[error("Перемещение курсора во время чтения файла. Путь: {path:?}. {reason:?}")]
     ReadSeekError { path: PathBuf, reason: String },
+
+    #[error("Путь заблокирован для записи. Путь: {path:?}. {reason:?}")]
+    LockedForWriteError { path: PathBuf, reason: String },
+
+    #[error("Ошибка при разборе файла блокировки. {reason:?}")]
+    ParseLockError { reason: String },
+
+    #[error("Ошибка при конвертации строки в UUID. {reason:?}")]
+    ParseUuidError { reason: String },
 }

@@ -1,7 +1,12 @@
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    str::FromStr,
+};
 
+use fs4me_interface::DriverError;
 use rand::random;
 
+#[derive(PartialEq, Eq, Hash)]
 pub struct FsUuid {
     /// Идентификатор подключения.
     pub connection_id: u64,
@@ -36,5 +41,33 @@ impl Clone for FsUuid {
             connection_id: self.connection_id,
             copy_id: self.copy_id + 1,
         }
+    }
+}
+
+impl FromStr for FsUuid {
+    type Err = DriverError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (connection_id, copy_id) =
+            s.split_once('_')
+                .ok_or_else(|| DriverError::ParseUuidError {
+                    reason: s.to_string(),
+                })?;
+
+        let connection_id = connection_id
+            .parse()
+            .map_err(|e| DriverError::ParseUuidError {
+                reason: format!(
+                    "Недопустимый формат connection_id: {e:?}. source: {connection_id:?}"
+                ),
+            })?;
+        let copy_id = copy_id.parse().map_err(|e| DriverError::ParseUuidError {
+            reason: format!("Недопустимый формат copy_id: {e:?}. source: {copy_id:?}"),
+        })?;
+
+        Ok(Self {
+            connection_id,
+            copy_id,
+        })
     }
 }
