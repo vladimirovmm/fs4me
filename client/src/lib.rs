@@ -274,7 +274,7 @@ mod tests {
     /// тестирование перемещения/переименования файлов и директорий
     #[test]
     #[traced_test]
-    fn test_move() {
+    fn test_mv() {
         let fs: Fs<_> = LocalDriver::connect("").unwrap().into();
         let root = tempfile::tempdir().unwrap();
         let root_path = root.path();

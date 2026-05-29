@@ -110,7 +110,7 @@ pub struct LockStat {
     /// Карта читателей: uuid -> unixtime блокировки
     read: HashMap<FsUuid, u32>,
     /// Карта писателей: uuid -> unixtime блокировки
-    write: HashMap<FsUuid, u32>,
+    write: Option<(FsUuid, u32)>,
 }
 
 /// Преобразует текс в структуру `LockStat`.
@@ -135,8 +135,12 @@ impl FromStr for LockStat {
                 continue;
             };
             match mode {
-                LockMode::Read => stat.read.insert(uuid, unixtime),
-                LockMode::Write => stat.write.insert(uuid, unixtime),
+                LockMode::Read => {
+                    stat.read.insert(uuid, unixtime);
+                }
+                LockMode::Write => {
+                    stat.write = Some((uuid, unixtime));
+                }
             };
         }
         Ok(stat)
@@ -188,7 +192,7 @@ impl LockStat {
         }
 
         // Добавляем писателей
-        for (uuid, unixtime) in &self.write {
+        if let Some((uuid, unixtime)) = &self.write {
             result.push_str(&format!("{}={}={}\n", uuid, unixtime, LockMode::Write));
         }
 
@@ -201,7 +205,12 @@ impl LockStat {
     fn remove_stale(&mut self, now: u32) {
         let stale_time = now.saturating_sub(5 * 60);
         self.read.retain(|_, unixtime| *unixtime > stale_time);
-        self.write.retain(|_, unixtime| *unixtime > stale_time);
+
+        if let Some((_, unixtime)) = &self.write
+            && *unixtime < stale_time
+        {
+            self.write = None;
+        }
     }
 
     /// Проверить, заблокирован ли файл для чтения или записи.
