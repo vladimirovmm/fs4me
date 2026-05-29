@@ -4,9 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-mod errors;
-mod open_params;
-pub use crate::{errors::DriverError, open_params::DriverParams};
+pub mod open_params;
+use crate::{driver::open_params::DriverParams, errors::DriverError};
 
 /// Режим записи файла.
 #[derive(Debug, PartialEq, Eq)]
@@ -72,12 +71,6 @@ pub trait Driver: Sized + Clone {
     /// @return Result<u32> - Результат: Unix timestamp в секундах
     fn server_time(&self) -> Result<u32, DriverError>;
 
-    /// Проверяет существование файла или директории.
-    ///
-    /// @param path - Путь к файлу или директории.
-    /// @return bool - Результат: true, если файл или директория существует, false - если нет.
-    fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
-
     /// Возвращает интератор путей файлов и директорий в указанной директории.
     ///
     /// @param path - Путь к директории.
@@ -90,6 +83,12 @@ pub trait Driver: Sized + Clone {
     /// }
     /// ```
     fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = PathBuf>, DriverError>;
+
+    /// Проверяет существование файла или директории.
+    ///
+    /// @param path - Путь к файлу или директории.
+    /// @return bool - Результат: true, если файл или директория существует, false - если нет.
+    fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
 
     /// Получить инофрмацию о файле/директории.
     ///

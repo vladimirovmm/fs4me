@@ -1,0 +1,56 @@
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum DriverError {
+    #[error("Ошибка при получения полного пути {path:?}. {reason:?}")]
+    PathResolutionError { path: PathBuf, reason: String },
+
+    #[error("Путь {0} существует")]
+    PathExistsError(PathBuf),
+
+    #[error("{0} Не является директорией")]
+    NotADirectoryError(PathBuf),
+
+    #[error("Ошибка при чтении директории. Путь:{path:?}. {reason:?}")]
+    ReadDirError { path: PathBuf, reason: String },
+
+    #[error("Не удалось получить родительскую директорию для {0:?}.")]
+    ParentDirError(PathBuf),
+
+    #[error("Не удалось получить имя файла/директории для {0:?}.")]
+    FileNameError(PathBuf),
+
+    #[error("Ошибка при получении времени. {0}")]
+    ServerTimeError(String),
+
+    #[error("Ошибка при получении информации о файле/директории. Путь:{path:?}. {reason:?}")]
+    StatError { path: PathBuf, reason: String },
+
+    #[error(
+        "Ошибка при получении даты последней модификации файла/директории. Путь: {path:?}. {reason:?}"
+    )]
+    LastModifiedError { path: PathBuf, reason: String },
+
+    #[error(
+        "Не удалось переместить/переименовать файл/директорию. Путь:{old_path:?}->{new_path:?}. {reason:?}"
+    )]
+    MvError {
+        old_path: PathBuf,
+        new_path: PathBuf,
+        reason: String,
+    },
+
+    #[error("Не удаётся создать директорию {path:?}. {reason:?}")]
+    MkdirError { path: PathBuf, reason: String },
+
+    #[error("Ошибка при удалении файла/директории. Путь: {path:?}. {reason:?}")]
+    RmError { path: PathBuf, reason: String },
+
+    #[error("Ошибка при открытии файла. Путь: {path:?}. {reason:?}")]
+    FopenError { path: PathBuf, reason: String },
+
+    #[error("Перемещение курсора во время чтения файла. Путь: {path:?}. {reason:?}")]
+    ReadSeekError { path: PathBuf, reason: String },
+}

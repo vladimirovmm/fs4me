@@ -1,6 +1,9 @@
 words = [
     "cstr",
     "dav",
+    "fopen",
     "lossy",
     "mkdir",
+    "clippy",
+    "Dwarnings"
 ]
