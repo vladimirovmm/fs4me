@@ -9,6 +9,7 @@ use std::{
 };
 
 use fs4me_interface::{Driver, DriverError, WriteMode};
+use tracing::error;
 
 use crate::{Fs, uuid::FsUuid};
 
@@ -209,7 +210,7 @@ impl<'a, D: Driver> Lock<'a, D> {
 impl<'a, D: Driver> Drop for Lock<'a, D> {
     fn drop(&mut self) {
         if let Err(e) = self.loop_unlock() {
-            eprintln!("Ошибка при снятии блокировки: {e}. {self}");
+            error!("Ошибка при снятии блокировки: {e}. {self}");
         }
     }
 }
@@ -464,7 +465,7 @@ mod tests {
 
     #[test]
     #[traced_test]
-    fn test_lock() {
+    fn test_serialize() {
         let uuid_default = FsUuid {
             connection_id: 1234,
             copy_id: 1,

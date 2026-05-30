@@ -26,6 +26,13 @@ pub struct Fs<D: Driver> {
     uuid: FsUuid,
 }
 
+/// Вернуть идентификатор клиента.
+impl<D: Driver> AsRef<FsUuid> for Fs<D> {
+    fn as_ref(&self) -> &FsUuid {
+        &self.uuid
+    }
+}
+
 impl<D: Driver> From<D> for Fs<D> {
     fn from(value: D) -> Self {
         Self::new(value)
@@ -164,12 +171,5 @@ impl<D: Driver> Fs<D> {
     ) -> Result<Box<dyn io::Read>, DriverError> {
         // @todo проверить блокировку
         self.driver.read(path, position)
-    }
-}
-
-/// Вернуть идентификатор клиента.
-impl<D: Driver> AsRef<FsUuid> for Fs<D> {
-    fn as_ref(&self) -> &FsUuid {
-        &self.uuid
     }
 }
