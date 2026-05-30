@@ -1,13 +1,25 @@
 use std::{
     collections::VecDeque,
     fmt::Display,
+    io,
     path::{Path, PathBuf},
     str::FromStr,
+    thread::sleep,
+    time::{Duration, Instant},
 };
 
-use fs4me_interface::{Driver, DriverError};
+use fs4me_interface::{Driver, DriverError, WriteMode};
 
 use crate::{Fs, uuid::FsUuid};
+
+/// Возвращает родительскую директорию для указанного пути.
+///
+/// @param path Путь к файлу/директории.
+/// @returns Путь к родительской директории.
+fn parent_dir(path: &Path) -> Result<&Path, DriverError> {
+    path.parent()
+        .ok_or_else(|| DriverError::ParentDirError(path.to_path_buf()))
+}
 
 /// Получить путь к файлу блокировки для указанного пути.
 ///
@@ -15,9 +27,7 @@ use crate::{Fs, uuid::FsUuid};
 /// @returns Путь к файлу блокировки.
 pub(crate) fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     let path = path.as_ref();
-    let parent = path
-        .parent()
-        .ok_or_else(|| DriverError::ParentDirError(path.to_path_buf()))?;
+    let parent = parent_dir(path)?;
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -37,9 +47,170 @@ pub struct Lock<'a, D: Driver> {
     source_path: PathBuf,
 }
 
+impl<D: Driver> Display for Lock<'_, D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Lock - uuid: {}, path: {:?}",
+            self.fs.uuid, self.source_path
+        )
+    }
+}
+
 impl<'a, D: Driver> Lock<'a, D> {
-    pub fn new(fs: &'a Fs<D>, source_path: PathBuf) -> Self {
-        Self { fs, source_path }
+    /// Блокирует файл или директорию для чтения или записи.
+    ///
+    /// @param fs - Клиент, к которой подключен драйвер.
+    /// @param path - Путь к файлу или директории.
+    /// @param mode - Режим блокировки.
+    /// @return Возвращает `Ok` с блокировкой в случае успеха, или `Err` в случае ошибки.
+    pub fn lock_with<P: AsRef<Path>>(
+        fs: &'a Fs<D>,
+        path: P,
+        mode: LockMode,
+    ) -> Result<Self, DriverError> {
+        let path = path.as_ref();
+        let lock = Self {
+            fs,
+            source_path: path.to_path_buf(),
+        };
+
+        lock.loop_lock(mode)?;
+        Ok(lock)
+    }
+
+    /// Проверяет, существует ли родительская директория для указанного пути.
+    ///
+    /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+    fn parent_dir_mast_exists(&self) -> Result<(), DriverError> {
+        parent_dir(&self.source_path).and_then(|path| {
+            if self.fs.exists(path) {
+                Ok(())
+            } else {
+                Err(DriverError::ParentDirError(self.source_path.clone()))
+            }
+        })
+    }
+
+    /// Возвращает информацию о блокировке файла или директории.
+    ///
+    /// @return Возвращает `Ok` с информацией о блокировке, или `Err` в случае ошибки.
+    fn read_lock(&self) -> Result<LockInfo, DriverError> {
+        let lock_file = lock_path(&self.source_path)?;
+        if !self.fs.exists(&lock_file) {
+            // Если lock файл не существует, возвращаем пустую структуру LockStat
+            return Ok(LockInfo::default());
+        }
+        // Читаем содержимое lock файла
+        let lock_reader = self.fs.driver.read(&lock_file, 0)?;
+        let lock_content =
+            io::read_to_string(lock_reader).map_err(|err| DriverError::ReadSeekError {
+                path: lock_file.to_path_buf(),
+                reason: err.to_string(),
+            })?;
+        // Парсим содержимое lock файла в структуру LockStat
+        let mut lock_stat = LockInfo::from_str(&lock_content)?;
+        // Удаляем устаревшие блокировки (unixtime + 5 минут < now)
+        lock_stat.remove_stale(self.fs.time()?);
+
+        Ok(lock_stat)
+    }
+
+    /// Записывает информацию о блокировке файла или директории.
+    ///
+    /// @param lock - Информация о блокировке.
+    /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+    fn write_lock(&self, lock: LockInfo) -> Result<(), DriverError> {
+        let lock_file = lock_path(&self.source_path)?;
+        // Преобразуем структуру LockStat в строку
+        let lock_content = lock.to_string();
+        // Записываем строку в lock файл
+        let mut lock_writer = self.fs.driver.write(&lock_file, WriteMode::Overwrite)?;
+        lock_writer
+            .write_all(lock_content.as_bytes())
+            .map_err(|err| DriverError::WriteError {
+                path: lock_file,
+                reason: err.to_string(),
+            })
+    }
+
+    /// Пытается блокировать файл/директорию для чтения/записи.
+    ///
+    /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
+    /// @return Result<()> - Результат: успех или ошибка
+    fn try_lock(&self, mode: LockMode) -> Result<(), DriverError> {
+        self.parent_dir_mast_exists()?;
+
+        if matches!(mode, LockMode::Write) {
+            self.try_lock(LockMode::WriteQueue)?;
+        }
+
+        let mut lock = self.read_lock()?;
+        lock.set(self.fs.uuid, self.fs.time()?, mode)
+            .map_err(|_| DriverError::LockedError {
+                path: self.source_path.clone(),
+                mode: mode.to_string(),
+            })?;
+        self.write_lock(lock)
+    }
+
+    /// Попытка блокировки файла/директории для чтения/записи в течение 30 секунд.
+    ///
+    /// @param path - Путь к файлу или директории.
+    /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
+    /// @return Result<()> - Результат: успех или ошибка
+    fn loop_lock(&self, mode: LockMode) -> Result<(), DriverError> {
+        let start = Instant::now();
+
+        self.parent_dir_mast_exists()?;
+
+        loop {
+            let result = self.try_lock(mode);
+            // Либо успех, либо время вышло
+            if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
+                return result;
+            }
+
+            sleep(Duration::from_millis(250));
+        }
+    }
+
+    /// Попытка снять блокировку от имени текущего uuid.
+    ///
+    /// @return Result<()> - Результат: успех или ошибка
+    fn try_unlock(&self) -> Result<(), DriverError> {
+        self.parent_dir_mast_exists()?;
+
+        let mut lock = self.read_lock()?;
+        lock.remove(self.fs);
+        self.write_lock(lock)
+    }
+
+    /// Снять блокировку от имени текущего uuid.
+    ///
+    /// @return Result<()> - Результат: успех или ошибка
+    fn loop_unlock(&self) -> Result<(), DriverError> {
+        let start = Instant::now();
+
+        self.parent_dir_mast_exists()?;
+
+        loop {
+            let result = self.try_unlock();
+            // Либо успех, либо время вышло
+            if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
+                return result;
+            }
+
+            sleep(Duration::from_millis(250));
+        }
+    }
+}
+
+impl<'a, D: Driver> Drop for Lock<'a, D> {
+    fn drop(&mut self) {
+        if let Err(e) = self.loop_unlock() {
+            eprintln!("Ошибка при снятии блокировки: {e}. {self}");
+        }
     }
 }
 
@@ -130,26 +301,24 @@ impl FromStr for LockInfo {
     }
 }
 
-impl ToString for LockInfo {
-    fn to_string(&self) -> String {
-        let mut result = String::new();
-
+impl Display for LockInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Блокировка на чтение
         for (uuid, unixtime) in &self.read {
-            result.push_str(&format!("{}={}={}\n", uuid, unixtime, LockMode::Read));
+            writeln!(f, "{}={}={}", uuid, unixtime, LockMode::Read)?;
         }
 
         // Блокировка на запись
         if let Some((uuid, unixtime)) = &self.write {
-            result.push_str(&format!("{}={}={}\n", uuid, unixtime, LockMode::Write));
+            writeln!(f, "{}={}={}", uuid, unixtime, LockMode::Write)?;
         }
 
         // Очередь на запись
         for (uuid, unixtime) in &self.write_queue {
-            result.push_str(&format!("{}={}={}\n", uuid, unixtime, LockMode::WriteQueue));
+            writeln!(f, "{}={}={}", uuid, unixtime, LockMode::WriteQueue)?;
         }
 
-        result
+        Ok(())
     }
 }
 

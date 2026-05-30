@@ -35,11 +35,14 @@ impl Display for FsUuid {
     }
 }
 
+/// Нестандартная реализация `Clone` для `FsUuid`.
+/// Нужно, чтобы при клонировании клиента Fs менялся идентификатор. Но чтобы было понятно, кто родитель
+#[allow(clippy::non_canonical_clone_impl)]
 impl Clone for FsUuid {
     fn clone(&self) -> Self {
         Self {
-            connection_id: self.connection_id,
-            copy_id: self.copy_id + 1,
+            connection_id: self.connection_id, // Идентификатор подключения
+            copy_id: self.copy_id + 1,         // Номер копии подключения
         }
     }
 }
