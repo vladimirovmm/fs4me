@@ -11,7 +11,7 @@ pub(crate) mod trash;
 pub(crate) mod uuid;
 
 use crate::{
-    lock::{LockMode, is_locked},
+    lock::{LockMode, is_operation_allowed},
     trash::trash_unique_path,
     uuid::FsUuid,
 };
@@ -99,7 +99,7 @@ impl<D: Driver> Fs<D> {
     pub fn mv<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), DriverError> {
         let to = to.as_ref();
 
-        if is_locked(self, to, LockMode::Write)? {
+        if !is_operation_allowed(self, to, LockMode::Write)? {
             return Err(DriverError::LockedForWriteError {
                 path: to.to_path_buf(),
                 reason: "Путь заблокирован для перемещения".to_string(),
@@ -158,5 +158,12 @@ impl<D: Driver> Fs<D> {
     ) -> Result<Box<dyn io::Read>, DriverError> {
         // @todo проверить блокировку
         self.driver.read(path, position)
+    }
+}
+
+/// Вернуть идентификатор клиента.
+impl<D: Driver> AsRef<FsUuid> for Fs<D> {
+    fn as_ref(&self) -> &FsUuid {
+        &self.uuid
     }
 }

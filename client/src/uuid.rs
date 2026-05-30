@@ -6,7 +6,7 @@ use std::{
 use fs4me_interface::DriverError;
 use rand::random;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Copy, Eq, Hash)]
 pub struct FsUuid {
     /// Идентификатор подключения.
     pub connection_id: u64,
@@ -69,5 +69,11 @@ impl FromStr for FsUuid {
             connection_id,
             copy_id,
         })
+    }
+}
+
+impl AsRef<FsUuid> for FsUuid {
+    fn as_ref(&self) -> &FsUuid {
+        self
     }
 }
