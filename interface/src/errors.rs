@@ -54,8 +54,11 @@ pub enum DriverError {
     #[error("Перемещение курсора во время чтения файла. Путь: {path:?}. {reason:?}")]
     ReadSeekError { path: PathBuf, reason: String },
 
-    #[error("Путь заблокирован для записи. Путь: {path:?}. {reason:?}")]
-    LockedForWriteError { path: PathBuf, reason: String },
+    #[error("Ошибка при записи в файл. Путь: {path:?}. {reason:?}")]
+    WriteError { path: PathBuf, reason: String },
+
+    #[error("Ошибка при блокировке. Путь: {path:?}. Режим: {mode:?}")]
+    LockedError { path: PathBuf, mode: String },
 
     #[error("Ошибка при разборе файла блокировки. {reason:?}")]
     ParseLockError { reason: String },
