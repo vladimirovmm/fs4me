@@ -43,6 +43,11 @@ pub(crate) fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError>
 
     Ok(parent.join(new_file_name))
 }
+
+/// Получить путь к временному файлу блокировки для указанного пути.
+///
+/// @param path Путь к файлу.
+/// @returns Путь к временному файлу блокировки.
 fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     let mut path = lock_path(path)?;
     let mut rng = rand::rng();

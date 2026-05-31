@@ -103,15 +103,11 @@ impl<D: Driver> Fs<D> {
     /// @param to - Целевой путь.
     /// @return Result<()> - Результат: успех или ошибка
     pub fn mv<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), DriverError> {
-        // Нужно проверить что новый путь для перемещения.
         let to = to.as_ref();
-        let parent_to = to.parent().unwrap_or(to);
-        if !self.exists(parent_to) {
-            return Err(DriverError::ParentDirError(parent_to.to_path_buf()));
-        }
         let from = from.as_ref();
 
         // Блокируем исходный и целевой файлы/директории для записи
+        // Проверка на наличие родительской директории происходит в блокировке
         // Разблокируется автоматически по выходе из области видимости
         let _from_lock = Lock::try_from(self, from, LockMode::Write)?;
         let _to_lock = Lock::try_from(self, to, LockMode::Write)?;
@@ -155,7 +151,14 @@ impl<D: Driver> Fs<D> {
         path: &P,
         mode: WriteMode,
     ) -> Result<Box<dyn io::Write>, DriverError> {
-        // @todo проверить блокировку
+        // Нужно проверить что новый путь для перемещения.
+        let path = &path.as_ref().to_path_buf();
+
+        // Блокируем файл для записи.
+        // Проверка на наличие родительской директори происход внутри функции Lock
+        // Разблокируется автоматически по выходе из области видимости
+        let _lock = Lock::try_from(self, path, LockMode::Write)?;
+
         self.driver.write(path, mode)
     }
 
@@ -169,7 +172,14 @@ impl<D: Driver> Fs<D> {
         path: &P,
         position: u64,
     ) -> Result<Box<dyn io::Read>, DriverError> {
-        // @todo проверить блокировку
+        // Нужно проверить что новый путь для перемещения.
+        let path = &path.as_ref().to_path_buf();
+
+        // Блокируем файл для чтения.
+        // Проверка на наличие родительской директори происход внутри функции Lock.
+        // Разблокируется автоматически по выходе из области видимости
+        let _lock = Lock::try_from(self, path, LockMode::Write)?;
+
         self.driver.read(path, position)
     }
 }
