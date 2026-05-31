@@ -113,8 +113,8 @@ impl<D: Driver> Fs<D> {
 
         // Блокируем исходный и целевой файлы/директории для записи
         // Разблокируется автоматически по выходе из области видимости
-        let _from_lock = Lock::lock_with(self, from, LockMode::Write)?;
-        let _to_lock = Lock::lock_with(self, to, LockMode::Write)?;
+        let _from_lock = Lock::try_from(self, from, LockMode::Write)?;
+        let _to_lock = Lock::try_from(self, to, LockMode::Write)?;
 
         // Перемещаем файл/директорию
         self.driver.mv(from, to)?;

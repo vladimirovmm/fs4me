@@ -1,14 +1,15 @@
+use fs4me_interface::{Driver, DriverError, WriteMode};
+use rand::{RngExt, distr::Alphanumeric};
 use std::{
     collections::VecDeque,
     fmt::Display,
+    hash::{DefaultHasher, Hash, Hasher},
     io,
     path::{Path, PathBuf},
     str::FromStr,
     thread::sleep,
     time::{Duration, Instant},
 };
-
-use fs4me_interface::{Driver, DriverError, WriteMode};
 use tracing::error;
 
 use crate::{Fs, uuid::FsUuid};
@@ -42,10 +43,30 @@ pub(crate) fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError>
 
     Ok(parent.join(new_file_name))
 }
+fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
+    let mut path = lock_path(path)?;
+    let mut rng = rand::rng();
+    path.set_file_name(format!(
+        "{}.{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default(),
+        (0..9)
+            .map(|_| rng.sample(Alphanumeric) as char)
+            .collect::<String>()
+    ));
+    Ok(path)
+}
 
 pub struct Lock<'a, D: Driver> {
+    /// Клиент для работы с файловой системой.
     fs: &'a Fs<D>,
+    /// Файл или директория, к которую нужно заблокировать.
     source_path: PathBuf,
+    /// Хеш содержимого блокировки.
+    hash: Option<u64>,
+    /// Время последнего изменения блокировки.
+    modified_time: Option<u32>,
 }
 
 impl<D: Driver> Display for Lock<'_, D> {
@@ -65,18 +86,20 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @param path - Путь к файлу или директории.
     /// @param mode - Режим блокировки.
     /// @return Возвращает `Ok` с блокировкой в случае успеха, или `Err` в случае ошибки.
-    pub fn lock_with<P: AsRef<Path>>(
+    pub fn try_from<P: AsRef<Path>>(
         fs: &'a Fs<D>,
         path: P,
         mode: LockMode,
     ) -> Result<Self, DriverError> {
         let path = path.as_ref();
-        let lock = Self {
+        let mut lock = Self {
             fs,
             source_path: path.to_path_buf(),
+            hash: None,
+            modified_time: None,
         };
 
-        lock.loop_lock(mode)?;
+        lock.retry_lock(mode)?;
         Ok(lock)
     }
 
@@ -96,12 +119,13 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// Возвращает информацию о блокировке файла или директории.
     ///
     /// @return Возвращает `Ok` с информацией о блокировке, или `Err` в случае ошибки.
-    fn read_lock(&self) -> Result<LockInfo, DriverError> {
+    fn read(&self) -> Result<LockInfoRead, DriverError> {
         let lock_file = lock_path(&self.source_path)?;
-        if !self.fs.exists(&lock_file) {
+        if self.fs.exists(&lock_file) {
             // Если lock файл не существует, возвращаем пустую структуру LockStat
-            return Ok(LockInfo::default());
+            return Ok(LockInfoRead::default());
         }
+
         // Читаем содержимое lock файла
         let lock_reader = self.fs.driver.read(&lock_file, 0)?;
         let lock_content =
@@ -110,49 +134,94 @@ impl<'a, D: Driver> Lock<'a, D> {
                 reason: err.to_string(),
             })?;
         // Парсим содержимое lock файла в структуру LockStat
-        let mut lock_stat = LockInfo::from_str(&lock_content)?;
+        let mut lock_info = LockInfo::from_str(&lock_content)?;
         // Удаляем устаревшие блокировки (unixtime + 5 минут < now)
-        lock_stat.remove_stale(self.fs.time()?);
+        lock_info.remove_stale(self.fs.time()?);
 
-        Ok(lock_stat)
+        // Вычисляем хеш содержимого lock файла
+        let hash = Some(lock_info.get_hash());
+        // Получаем время последнего изменения lock файла
+        let modified_time = self.fs.stat(&lock_file).ok().map(|stat| stat.modified());
+        if modified_time.is_none() {
+            // Если lock файл не существует, возвращаем пустую структуру LockStat
+            return Ok(LockInfoRead::default());
+        }
+
+        Ok(LockInfoRead {
+            lock_info,
+            modified_time,
+            hash,
+        })
     }
 
     /// Записывает информацию о блокировке файла или директории.
     ///
     /// @param lock - Информация о блокировке.
     /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
-    fn write_lock(&self, lock: LockInfo) -> Result<(), DriverError> {
-        let lock_file = lock_path(&self.source_path)?;
+    fn write(&self, lock: LockInfo) -> Result<(), DriverError> {
+        // Создаем временный файл для записи блокировки
+        let tmp_path = tmp_lock_path(&self.source_path)?;
         // Преобразуем структуру LockStat в строку
         let lock_content = lock.to_string();
         // Записываем строку в lock файл
-        let mut lock_writer = self.fs.driver.write(&lock_file, WriteMode::Overwrite)?;
+        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::Overwrite)?;
         lock_writer
             .write_all(lock_content.as_bytes())
             .map_err(|err| DriverError::WriteError {
-                path: lock_file,
+                path: tmp_path.clone(),
                 reason: err.to_string(),
-            })
+            })?;
+
+        // Перемещаем временный файл в окончательное место
+        (|| {
+            let path = lock_path(&self.source_path)?;
+            let LockInfoRead {
+                modified_time,
+                hash,
+                ..
+            } = self.read()?;
+            // Убеждаемся, что блокировка не была изменена другими клиентами
+            if self.hash != hash || self.modified_time != modified_time {
+                return Err(DriverError::LockChangedError(path));
+            }
+            // Перемещаем временный файл в окончательное место
+            self.fs.driver.mv(&tmp_path, &path)
+        })()
+        .map_err(|err| {
+            // Удаляем временный файл в случае ошибки
+            if let Err(err_rm) = self.fs.rm(tmp_path) {
+                error!("Ошибка при удалении временного файла блокировки: {err_rm}. Причина удаления временного файла: {err}");
+            }
+            err
+        })
     }
 
     /// Пытается блокировать файл/директорию для чтения/записи.
     ///
     /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
     /// @return Result<()> - Результат: успех или ошибка
-    fn try_lock(&self, mode: LockMode) -> Result<(), DriverError> {
+    fn try_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         self.parent_dir_mast_exists()?;
 
         if matches!(mode, LockMode::Write) {
             self.try_lock(LockMode::WriteQueue)?;
         }
 
-        let mut lock = self.read_lock()?;
-        lock.set(self.fs.uuid, self.fs.time()?, mode)
+        let LockInfoRead {
+            mut lock_info,
+            modified_time,
+            hash,
+        } = self.read()?;
+        self.hash = hash;
+        self.modified_time = modified_time;
+
+        lock_info
+            .set(self.fs.uuid, self.fs.time()?, mode)
             .map_err(|_| DriverError::LockedError {
                 path: self.source_path.clone(),
                 mode: mode.to_string(),
             })?;
-        self.write_lock(lock)
+        self.write(lock_info)
     }
 
     /// Попытка блокировки файла/директории для чтения/записи в течение 30 секунд.
@@ -160,7 +229,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @param path - Путь к файлу или директории.
     /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
     /// @return Result<()> - Результат: успех или ошибка
-    fn loop_lock(&self, mode: LockMode) -> Result<(), DriverError> {
+    fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         let start = Instant::now();
 
         self.parent_dir_mast_exists()?;
@@ -179,18 +248,25 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// Попытка снять блокировку от имени текущего uuid.
     ///
     /// @return Result<()> - Результат: успех или ошибка
-    fn try_unlock(&self) -> Result<(), DriverError> {
+    fn try_unlock(&mut self) -> Result<(), DriverError> {
         self.parent_dir_mast_exists()?;
 
-        let mut lock = self.read_lock()?;
-        lock.remove(self.fs);
-        self.write_lock(lock)
+        let LockInfoRead {
+            mut lock_info,
+            modified_time,
+            hash,
+        } = self.read()?;
+        self.hash = hash;
+        self.modified_time = modified_time;
+
+        lock_info.remove(self.fs);
+        self.write(lock_info)
     }
 
     /// Снять блокировку от имени текущего uuid.
     ///
     /// @return Result<()> - Результат: успех или ошибка
-    fn loop_unlock(&self) -> Result<(), DriverError> {
+    fn retry_unlock(&mut self) -> Result<(), DriverError> {
         let start = Instant::now();
 
         self.parent_dir_mast_exists()?;
@@ -209,7 +285,7 @@ impl<'a, D: Driver> Lock<'a, D> {
 
 impl<'a, D: Driver> Drop for Lock<'a, D> {
     fn drop(&mut self) {
-        if let Err(e) = self.loop_unlock() {
+        if let Err(e) = self.retry_unlock() {
             error!("Ошибка при снятии блокировки: {e}. {self}");
         }
     }
@@ -247,16 +323,25 @@ impl Display for LockMode {
     }
 }
 
+/// Структура, содержащая информацию о блокировке файла и её статусе.
+#[derive(Debug, Default)]
+struct LockInfoRead {
+    /// Информация о блокировке файла.
+    lock_info: LockInfo,
+    /// Время последнего изменения файла.
+    modified_time: Option<u32>,
+    /// Хеш файла.
+    hash: Option<u64>,
+}
+
 /// Информация о блокировке файла.
 /// Хранит информацию о читателях, писателях и очереди на запись.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LockInfo {
     /// Карта читателей: uuid -> unixtime блокировки
     read: Vec<(FsUuid, u32)>,
-
     /// Карта писателей: uuid -> unixtime блокировки
     write: Option<(FsUuid, u32)>,
-
     /// Очередь на запись: список uuid ожидающих блокировки.
     write_queue: VecDeque<(FsUuid, u32)>,
 }
@@ -439,6 +524,16 @@ impl LockInfo {
         {
             self.write = None;
         }
+    }
+
+    /// Вычислить хеш содержимого блокировки.
+    /// Использует [DefaultHasher] для вычисления хеша.
+    ///
+    /// @return Вычисленный хеш
+    pub(crate) fn get_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
     }
 }
 

@@ -16,7 +16,6 @@ tracing.workspace = true
 fs4me-local.workspace = true
 
 tracing-test.workspace = true
-rand.workspace = true
 tempfile.workspace = true
 
 [lints]
