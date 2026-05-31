@@ -186,7 +186,7 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для чтения.
         // Проверка на наличие родительской директори происход внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости
-        let _lock = Lock::try_from(self, path, LockMode::Write)?;
+        let _lock = Lock::try_from(self, path, LockMode::Read)?;
 
         self.driver.read(path, position)
     }
