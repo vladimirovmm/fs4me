@@ -144,8 +144,9 @@ impl<D: Driver> Fs<D> {
     /// @return Result<()> - Результат: успешное удаление (перемещение в корзину) или ошибка.
     pub fn rm<P: AsRef<Path>>(&self, path: P) -> Result<(), DriverError> {
         let path = path.as_ref();
+        // Путь, куда будет перемещён файл
         let new_path = trash_unique_path(self.driver.as_ref(), path)?;
-
+        // Проверка блокировки происходит внутри mv
         self.mv(path, new_path)
     }
 
@@ -163,8 +164,8 @@ impl<D: Driver> Fs<D> {
         let path = &path.as_ref().to_path_buf();
 
         // Блокируем файл для записи.
-        // Проверка на наличие родительской директори происход внутри функции Lock
-        // Разблокируется автоматически по выходе из области видимости
+        // Проверка на наличие родительской директории происходит внутри функции Lock.
+        // Разблокируется автоматически по выходе из области видимости.
         let _lock = Lock::try_from(self, path, LockMode::Write)?;
 
         self.driver.write(path, mode)
@@ -174,7 +175,7 @@ impl<D: Driver> Fs<D> {
     ///
     /// @param path - Путь к файлу.
     /// @param position - Позиция в файле, с которой начать чтение.
-    /// @return Result<Box<dyn io::Read>> - Результат: успешное чтение или ошибка.
+    /// @return Result<Box<dyn io::Read>, DriverError> - Результат: успешное чтение или ошибка.
     pub fn read<P: AsRef<Path>>(
         &self,
         path: &P,
