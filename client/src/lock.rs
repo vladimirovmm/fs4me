@@ -163,17 +163,23 @@ impl<'a, D: Driver> Lock<'a, D> {
         let tmp_path = tmp_lock_path(&self.source_path)?;
         // Преобразуем структуру LockStat в строку
         let lock_content = lock.to_string();
-        // Записываем строку в lock файл
-        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::Overwrite)?;
-        lock_writer
-            .write_all(lock_content.as_bytes())
-            .map_err(|err| DriverError::WriteError {
-                path: tmp_path.clone(),
-                reason: err.to_string(),
-            })?;
 
         // Перемещаем временный файл в окончательное место
         (|| {
+	        // Записываем строку в lock файл
+	        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::FailIfExists)?;
+	        lock_writer
+	            .write_all(lock_content.as_bytes())
+	            .map_err(|err| DriverError::WriteError {
+	                path: tmp_path.clone(),
+	                reason: err.to_string(),
+	            })?;
+	        lock_writer.flush().map_err(|err| DriverError::WriteError {
+	            path: tmp_path.clone(),
+	            reason: err.to_string(),
+	        })?;
+	        drop(lock_writer);
+
             let path = lock_path(&self.source_path)?;
             let LockInfoRead {
                 modified_time,
@@ -189,7 +195,7 @@ impl<'a, D: Driver> Lock<'a, D> {
         })()
         .map_err(|err| {
             // Удаляем временный файл в случае ошибки
-            if let Err(err_rm) = self.fs.rm(tmp_path) {
+            if self.fs.exists(&tmp_path) && let Err(err_rm) = self.fs.rm(tmp_path) {
                 error!("Ошибка при удалении временного файла блокировки: {err_rm}. Причина удаления временного файла: {err}");
             }
             err
