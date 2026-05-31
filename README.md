@@ -1,547 +1,171 @@
-# fs4me — Рабочая файловая система на Rust
+# fs4me — клиент для работы с файловыми системами.
 
-**fs4me** — это Rust-пакет с локальным файловым драйвером, который обеспечивает безопасный одновременный доступ к файлам через lock-механизмы, корзину (trash) и UUID-идентификаторы.
+---
 
-## 🎯 Возможности
+## Обзор
 
-- ✅ Безопасный одновременный доступ к файлам (read/write locks)
-- ✅ Корзина (trash) для безопасного удаления файлов и директорий
-- ✅ UUID-идентификаторы для отслеживания соединений
-- ✅ Рекурсивное создание и удаление директорий
-- ✅ Поддержка режимов записи: overwrite, append, fail-if-exists
-- ✅ Интеграция с C-программами (FFI)
-- ✅ F-тесты для тестирования файловых систем
+fs4me — это библиотека Rust, предоставляющая унифицированный интерфейс для работы с файлами и директориями через драйверы. В основе лежит паттерн драйвера, позволяющий легко добавлять поддержку различных файловых систем.
 
-## 📦 Пакеты
+**Что реализовано:**
+- Локальный драйвер (доступ к файловой системе хоста)
+- Fs клиент — обёртка с lock-механизмами и безопасными операциями
+- Интерфейсный trait для создания собственных драйверов
 
-- **`fs4me-interface`** — базовый интерфейс с trait `Driver` и параметрами подключения
-- **`fs4me-local`** — локальный файловый драйвер для работы с файловой системой
-- **`fs4me-client`** — обёртка над драйвером с lock-механизмами, корзиной и UUID
+---
 
-## 🚀 Быстрый старт
-
-### 1. Установка в `Cargo.toml`
-
-```toml
-[dependencies]
-fs4me-local = { path = "./driver/local" }
-fs4me-client = { path = "./client" }
-```
-
-### 2. Пример использования
-
-```rust
-use fs4me_local::LocalDriver;
-use fs4me_interface::DriverParams;
-
-fn main() {
-    // Подключение к локальной файловой системе
-    let driver = LocalDriver::connect(DriverParams::default())
-        .unwrap();
-
-    // Обёртка с lock-механизмами и UUID
-    let client = fs4me_client::Fs::new(driver);
-
-    // Перечисление директории
-    let files: Vec<_> = client.ls("/")
-        .unwrap()
-        .filter_map(|p| p.to_str())
-        .collect();
-
-    // Получение информации о драйвере
-    println!("Драйвер: {}", client.driver_info());
-
-    // Текущее время сервера
-    if let Ok(time) = client.time() {
-        println!("Время сервера: {}", time);
-    }
-}
-```
-
-## 📁 Структура проекта
+## Структура проекта
 
 ```
 fs4me/
-├── Cargo.toml                      # Workspace конфигурация
-├── README.md                       # Этот файл
-├── SPECIFICATION.md                # Детальная спецификация
-├── codebook.toml                   # Конфигурация проекта
-├── driver/
-│   └── local/                      # Локальный драйвер
-│       └── src/
-│           ├── lib.rs              # Реализация локального драйвера
-│           ├── interface/          # Trait Driver и вспомогательные типы
-│           │   ├── mod.rs          # Основной модуль
-│           │   ├── open_params.rs  # Параметры подключения
-│           │   └── errors.rs       # Обработка ошибок
-│           ├── open/               # Открытие файлов
-│           │   ├── mod.rs          # Основной модуль
-│           │   ├── read.rs         # Чтение файлов
-│           │   └── write.rs        # Запись файлов
-│           ├── mkdir/              # Создание директорий
-│           │   └── mod.rs
-│           ├── stat/               # Получение статистики
-│           │   └── mod.rs
-│           ├── mv/                 # Перемещение файлов
-│           │   └── mod.rs
-│           ├── rm/                 # Удаление файлов
-│           │   └── mod.rs
-│           └── ffi/                # FFI-экспорт
-│               ├── mod.rs
-│               ├── connect.rs
-│               ├── info.rs
-│               ├── read.rs
-│               └── write.rs
-├── interface/
-│   └── src/
-│       ├── lib.rs                  # Trait `Driver` и вспомогательные типы
-│       ├── open_params.rs          # Параметры подключения
-│       └── errors.rs               # Обработка ошибок
-├── client/
-│   └── src/
-│       ├── lib.rs                  # Обёртка с lock-механизмами
-│       ├── lock.rs                 # Реализация блокировок
-│       ├── trash.rs                # Корзина (trash)
-│       └── uuid.rs                 # UUID-идентификаторы
-├── target/                         # Build-артефакты
-└── .gitignore                      # Игнорируемые файлы
+├── Cargo.toml
+├── Cargo.lock
+├── driver/          # Драйверы (локальный, фатальный и т.д.)
+│   └── local/       # Реализация локального драйвера
+│       └── src/lib.rs
+├── interface/       # Базовый интерфейс
+│   └── src/lib.rs
+├── client/          # Fs клиент с lock-управлением и удалением в корзину
+    │   ├── src/
+    │   │   ├── lib.rs      # Основная реализация клиента Fs
+    │   │   ├── lock.rs     # Механизм lock-файлов (чтение/запись/очередь)
+    │   │   ├── trash.rs    # Удаление в корзину (mv в корзину)
+    │   │   └── uuid.rs     # UUID для идентификации клиентов
+    │   ├── tests/
+    │   └── Cargo.toml
+└── target/          # Сборка (не входит в исходный код)
 ```
 
-## 🏗️ Интерфейс (Trait `Driver`)
+---
 
-Trait `Driver` определяет стандартный набор методов для работы с файлами:
+## Fs клиент
 
-| Метод | Описание |
-|-------|----------|
-| `name()` | Возвращает название драйвера |
-| `version()` | Возвращает версию драйвера |
-| `info()` | Возвращает строку "имя + версия" |
-| `connect()` | Подключение к хранилищу с параметрами |
-| `disconnect()` | Отключение и очистка ресурсов |
-| `server_time()` | Текущее время сервера (Unix timestamp) |
-| `exists()` | Проверка существования файла/директории |
-| `ls()` | Перечисление содержимого директории |
-| `stat()` | Получение информации о файле/директории |
-| `mv()` | Перемещение/переименование файла |
-| `mkdir()` | Создание директории (рекурсивно) |
-| `rm()` | Удаление файла/директории |
-| `read()` | Чтение файла с указательной позицией |
-| `write()` | Запись в файл с режимом (append/overwrite/fail) |
+Fs клиент представляет собой обёртку над драйвером с автоматическим управлением lock-файлами. Он обеспечивает безопасную работу с файлами, директориями и поддерживает параллельные операции.
 
-### Параметры подключения
+### Основные методы
 
-```rust
-use fs4me_interface::DriverParams;
+#### Работа с путями
 
-// Из HashMap
-let params = DriverParams::from([
-    ("PATH".to_string(), "/some/path".to_string()),
-    ("VERBOSE".to_string(), "true".to_string()),
-]);
+- `exists(path: &Path)` — проверка существования файла или директории
+- `stat(path: &Path)` — получение информации о файле (размер, права, дата изменения)
+- `read(path: &Path, position: u64 = 0)` — чтение файла с указанной позиции
+- `write(path: &Path, data: &[u8], mode: WriteMode)` — запись данных в файл
+- `mv(from: &Path, to: &Path)` — перемещение файла или переименование
+- `ls(path: &Path)` — перечисление содержимого директории
+- `mkdir(path: &Path, recursive: bool)` — создание директории
+- `rm(path: &Path)` — удаление файла или непустой директории
 
-// Из строки (формат KEY=VALUE\nKEY=VALUE)
-let params = DriverParams::from("PATH=/some/path\nVERBOSE=true");
 
-// Из C-строки
-let params = DriverParams::from(CString::new("PATH=/some/path").unwrap());
-```
+---
 
-## 🔒 Безопасность и lock-механизмы
+## Примеры работы с клиентом
 
-Все операции чтения и записи защищены блокировками:
-
-- ✅ **Заблокированные операции**: `read`, `write`, `mv`, `rm`
-- ✅ **Автоматическое освобождение**: блокировки освобождаются по выходу из области видимости
-- ✅ **Рекурсивные блокировки**: родительская директория блокируется при операции
-
-```rust
-// Чтение файла с автоматическим lock-ом
-let reader = client.read("/path/to/file.txt", 0)?;
-// ... чтение ...
-// Lock автоматически освобождается при выходе из области видимости
-
-// Запись в файл с автоматическим lock-ом
-let writer = client.write("/path/to/file.txt", WriteMode::Overwrite)?;
-// ... запись ...
-// Lock автоматически освобождается при выходе из области видимости
-```
-
-## 🗑️ Корзина (Trash)
-
-Метод `rm()` перемещает файл/директорию в корзину, а не удаляет его безвозвратно:
-
-```rust
-// Перемещение файла в корзину
-client.rm("/path/to/file.txt")?;
-
-// Файл перемещён в уникальное место (через `trash_unique_path`)
-// Чтобы восстановить файл, нужно переместить его обратно:
-client.mv("/trash/path/to/file.txt", "/path/to/file.txt")?;
-```
-
-## 📊 Зависимости
-
-### Основные
-- `thiserror` — обработка ошибок
-- `rand` — генерация UUID
-- `chrono` — работа с временными метками
-- `tracing` — логирование
-- `tempfile` — тестирование
-
-### Dev-зависимости
-- `tracing-test` — тестирование логирования
-- `tracing-subscriber` — JSON-логирование
-
-## 🔬 Тестирование
-
-```bash
-# Unit-тесты
-cargo test
-
-# Просмотр логов тестов
-cargo test -- --nocapture
-```
-
-Существующие тесты:
-- `test_driver_info` — проверка имени и версии
-- `test_time` — проверка времени сервера
-- `test_ls` — перечисление директории
-- `test_rename` — перемещение файлов
-- `test_work_with_directory` — комплексные тесты
-- `test_rw` — тесты чтения/записи
-
-## 🧩 Типы и структуры
-
-### `Stat` — Информация о файле/директории
-
-```rust
-pub struct Stat {
-    pub name: String,              // Имя файла/директории
-    pub path: PathBuf,             // Полный путь
-    pub kind: FileKind,            // Тип: File, Dir, Link
-    pub size: u64,                 // Размер (для файлов)
-    pub modified: DateTime<Utc>,   // Время изменения
-    pub created: DateTime<Utc>,    // Дата создания
-    pub deleted: Option<DateTime<Utc>>, // Дата удаления
-}
-```
-
-### `DriverParams` — Параметры подключения
-
-```rust
-pub struct DriverParams {
-    pub params: HashMap<String, String>,
-}
-
-// Создание из HashMap
-let params = DriverParams::from([
-    ("PATH".to_string(), "/some/path".to_string()),
-    ("VERBOSE".to_string(), "true".to_string()),
-]);
-
-// Создание из строки
-let params = DriverParams::from("PATH=/some/path\nVERBOSE=true");
-
-// Создание из C-строки
-let params = DriverParams::from(CString::new("PATH=/some/path").unwrap());
-```
-
-### `WriteMode` — Режимы записи
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WriteMode {
-    Overwrite,   // Записать с перезаписью существующих данных
-    Append,      // Записать в конец файла
-    FailIfExists, // Не создавать файл если он уже существует
-}
-```
-
-### `LockMode` — Режимы блокировок
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LockMode {
-    Read,    // Блокировка для чтения
-    Write,   // Блокировка для записи
-}
-```
-
-### `FileKind` — Типы файлов
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileKind {
-    File,     // Обычный файл
-    Dir,      // Директория
-    Link,     // Символическая ссылка
-}
-```
-
-### `Read` — Чтение файла
-
-```rust
-pub struct Read<'a, S: Driver>
-where
-    S::Open<'a>: Read,
-{
-    // Чтение с указательной позицией
-    fn read_to_string(&mut self) -> Result<String, S::Error>;
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, S::Error>;
-    fn seek(&mut self, pos: SeekPosition) -> Result<u64, S::Error>;
-}
-
-pub enum SeekPosition {
-    Start(u64),   // От начала файла
-    Current(i64), // От текущей позиции
-    End(i64),     // От конца файла
-}
-```
-
-### `Write` — Запись в файл
-
-```rust
-pub struct Write<'a, S: Driver>
-where
-    S::Open<'a>: Write,
-{
-    // Запись данных
-    fn write_all(&mut self, data: &[u8]) -> Result<(), S::Error>;
-    fn write(&mut self, data: &[u8]) -> Result<usize, S::Error>;
-    fn flush(&mut self) -> Result<(), S::Error>;
-}
-```
-
-## 📦 Использование пакетов
-
-### `fs4me-interface` (общий интерфейс)
-
-```toml
-[dependencies]
-fs4me-interface = { path = "../interface" }
-```
-
-Пример:
-
-```rust
-use fs4me_interface::Driver;
-
-trait Driver {
-    type Open<'a>: Send + Sync;
-    type Error: std::error::Error;
-
-    fn name(&self) -> &str;
-    fn version(&self) -> &str;
-    fn info(&self) -> String;
-    fn connect(params: DriverParams) -> Result<Self, Self::Error> where Self: Sized;
-    fn disconnect(&mut self);
-}
-```
-
-### `fs4me-local` (локальный драйвер)
-
-```toml
-[dependencies]
-fs4me-local = { path = "../driver/local" }
-```
-
-Пример:
-
-```rust
-use fs4me_local::LocalDriver;
-use fs4me_interface::DriverParams;
-
-// Подключение к локальной файловой системе
-let driver = LocalDriver::connect(DriverParams::default())
-    .unwrap();
-
-// Получение информации о драйвере
-println!("Драйвер: {}", driver.info());
-```
-
-### `fs4me-client` (обёртка с lock-механизмами)
-
-```toml
-[dependencies]
-fs4me-client = { path = "../client" }
-```
-
-Пример:
+### Базовый пример: чтение и запись
 
 ```rust
 use fs4me_client::Fs;
 use fs4me_local::LocalDriver;
-use fs4me_interface::DriverParams;
+use fs4me_interface::WriteMode;
 
 fn main() -> anyhow::Result<()> {
-    // Подключение
-    let driver = LocalDriver::connect(DriverParams::default())?;
+    // Подключаем локальный драйвер
+    let driver = LocalDriver::connect(Default::default())?;
+    let mut client = Fs<LocalDriver>::from(driver);
 
-    // Создание обёртки
-    let client = Fs::new(driver);
+    // Проверяем существование файла
+    if client.exists("/tmp/test.txt") {
+        println!("Файл существует");
+    }
 
-    // Перечисление директории
-    let files: Vec<_> = client.ls("/")
-        .unwrap()
-        .filter_map(|p| p.to_str())
-        .collect();
+    // Получаем информацию о файле
+    if let Some(stat) = client.stat("/tmp/test.txt") {
+        println!("Размер файла: {} байт", stat.size);
+    }
 
-    // Создание директории
-    client.mkdir("/new_dir", true)?;
+    // Записываем данные в файл
+    let data = b"Hello from fs4me client!";
+    client.write("/tmp/test.txt", data, WriteMode::Overwrite)?;
 
-    // Перемещение файла
-    client.mv("/old_file.txt", "/new_file.txt")?;
+    // Читаем файл с позиции 0
+    let content = client.read("/tmp/test.txt", 0)?;
+    println!("Содержимое: {}", String::from_utf8_lossy(&content));
 
-    // Перемещение в корзину
-    client.rm("/to_delete.txt")?;
-
-    // Чтение файла
-    let reader = client.read("/data.txt", 0)?;
-    let data = reader.read_to_string()?;
-    println!("Контент: {}", data);
-
-    // Запись в файл
-    let writer = client.write("/output.txt", WriteMode::Overwrite)?;
-    writer.write_all(b"Hello, world!")?;
+    // Перечисляем содержимое директории
+    let contents = client.ls("/tmp")?;
+    for entry in contents {
+        println!("{} (тип: {:?})", entry.name, entry.kind);
+    }
 
     Ok(())
 }
 ```
 
-## 🔧 FFI-экспорт
+### Создание директории и удаление
 
-Модуль `driver/local/src/ffi` предоставляет обёртки для взаимодействия с файловой системой из C-программ через `extern "C"`:
+```rust
+use fs4me_client::Fs;
+use fs4me_local::LocalDriver;
 
-### Доступные функции
+fn main() -> anyhow::Result<()> {
+    // Подключаем локальный драйвер
+    let driver = LocalDriver::connect(Default::default())?;
+    let mut client = Fs<LocalDriver>::from(driver);
 
-#### `fs4me_connect`
+    // Создаём директории (рекурсивно)
+    client.mkdir("/tmp/new_dir", true)?;
+    println!("Создан: /tmp/new_dir");
 
-```c
-#include "fs4me.h"
+    // Создаём поддиректорию без рекурсии
+    client.mkdir("/tmp/new_dir/subdir", false)?;
+    println!("Создан: /tmp/new_dir/subdir");
 
-// Подключение к файловой системе
-Fs* fs = fs4me_connect("PATH=/some/path", true);
+    // Удаляем непустую директорию с содержимым
+    client.rm("/tmp/new_dir")?;
+    println!("Удалён: /tmp/new_dir с содержимым");
 
-// Отключение
-fs4me_disconnect(fs);
-```
-
-#### `fs4me_info`
-
-```c
-// Получение строки "имя + версия"
-const char* info = fs4me_info(fs);
-fs4me_free_string(info);
-```
-
-#### `fs4me_read`
-
-```c
-// Чтение файла
-char* data = fs4me_read(fs, "/path/to/file.txt", 0);
-int len = fs4me_free_string(data);  // Возвращает длину строки
-```
-
-#### `fs4me_write`
-
-```c
-// Запись в файл
-bool result = fs4me_write(fs, "/path/to/file.txt", "/some/data.txt", true);
-```
-
-### Использование в C-проекте
-
-```c
-#include "fs4me.h"
-
-int main() {
-    // Подключение
-    Fs* fs = fs4me_connect("PATH=/home/user", true);
-    
-    if (!fs) {
-        fprintf(stderr, "Ошибка подключения\n");
-        return 1;
-    }
-
-    // Чтение файла
-    char* content = fs4me_read(fs, "/etc/passwd", 0);
-    if (content) {
-        printf("Первые 100 символов: %.100s\n", content);
-        fs4me_free_string(content);
-    }
-
-    // Запись в файл
-    fs4me_write(fs, "/tmp/output.txt", "Hello from C!\n", true);
-    
-    // Отключение
-    fs4me_disconnect(fs);
-    
-    return 0;
+    Ok(())
 }
 ```
 
-## 🔧 Модуль `ffi_tests`
+### Перемещение и переименование
 
-Модуль `driver/local/src/ffi_tests` содержит тесты для проверки FFI-функций:
+```rust
+use fs4me_client::Fs;
+use fs4me_local::LocalDriver;
+use fs4me_interface::WriteMode;
 
-```c
-#include "fs4me.h"
-#include <stdio.h>
+fn main() -> anyhow::Result<()> {
+    // Подключаем локальный драйвер
+    let driver = LocalDriver::connect(Default::default())?;
+    let mut client = Fs<LocalDriver>::from(driver);
 
-int main() {
-    // Тест подключения
-    Fs* fs = fs4me_connect("PATH=/tmp", true);
-    if (!fs) {
-        fprintf(stderr, "Ошибка подключения\n");
-        return 1;
-    }
+    // Создаём файл для перемещения
+    client.write("/tmp/original.txt", b"test", WriteMode::Overwrite)?;
+    println!("Создан: /tmp/original.txt");
 
-    printf("Драйвер: %s\n", fs4me_info(fs));
+    // Перемещаем файл
+    client.mv("/tmp/original.txt", "/tmp/moved.txt")?;
+    println!("Перемещён: /tmp/original.txt → /tmp/moved.txt");
 
-    // Тест перечисления директории
-    char** files = fs4me_ls(fs, "/");
-    if (files) {
-        for (int i = 0; files[i] != NULL; i++) {
-            printf("Файл: %s\n", files[i]);
-            fs4me_free_string(files[i]);
-        }
-        fs4me_free_string_array(files);
-    }
+    // Можно переименовывать и директории
+    client.mv("/tmp/new_dir", "/tmp/renamed_dir")?;
+    println!("Переименован: /tmp/new_dir → /tmp/renamed_dir");
 
-    // Тест чтения файла
-    char* content = fs4me_read(fs, "/etc/hostname", 0);
-    if (content) {
-        printf("hostname: %.100s\n", content);
-        fs4me_free_string(content);
-    }
-
-    // Тест записи файла
-    fs4me_write(fs, "/tmp/test_ffi.txt", "Привет, FFI!\n", true);
-    if (fs4me_exists(fs, "/tmp/test_ffi.txt")) {
-        printf("Файл успешно создан\n");
-    }
-
-    fs4me_disconnect(fs);
-    return 0;
+    Ok(())
 }
 ```
 
-## 🚀 План развития
+---
 
-1. Реализовать модуль `ffi_tests`
-2. Добавить поддержку `SFTP`, `FTP`, `WebDav` и других файловых систем
-3. Реализовать общий макрос для FFI-экспорта
-4. Полная документация для разработчиков
-5. Добавить поддержку потоков и асинхронных операций
+## Безопасность
 
-## 📄 Лицензия
+- **Lock-файлы**: поддержка параллельного чтения (`Read`) и эксклюзивной блокировки при записи (`Write`). При записи используется очередь (`WriteQueue`) для ожидания освобождения lock.
+- **Удаление в корзину**: `rm` перемещает файл/директорию в корзину, проверяя блокировки только удаляемого пути.
+- **Автоматическое освобождение lock**: lock-файлы освобождаются автоматически при выходе из области видимости (`Drop` trait).
 
-Проект распространяется по лицензии MIT.
+---
 
-## 📞 Контакты
+## Разработчик
 
-**Автор:** VMM <vladimirov.m.m@mail.ru>
-
-**GitHub:** [fs4me](https://github.com/vladimirovmm/fs4me)
-
-**Вопросы?** — Создайте Issue или отправьте Pull Request!
+**VMM <vladimirov.m.m@mail.ru>**
+Лицензия: MIT
+Создан: 2024
