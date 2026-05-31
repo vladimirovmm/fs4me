@@ -33,12 +33,14 @@ impl<D: Driver> AsRef<FsUuid> for Fs<D> {
     }
 }
 
+/// Преобразование из драйвера в клиента
 impl<D: Driver> From<D> for Fs<D> {
     fn from(value: D) -> Self {
         Self::new(value)
     }
 }
 
+/// Автоматическое отключение от сервера при удалении клиента
 impl<D: Driver> Drop for Fs<D> {
     fn drop(&mut self) {
         if let Err(e) = self.driver.disconnect() {
@@ -48,9 +50,15 @@ impl<D: Driver> Drop for Fs<D> {
 }
 
 impl<D: Driver> Fs<D> {
+    /// Создает новый клиент, предоставляя доступ к драйверу файловой системы.
+    ///
+    /// @param driver - экземпляр драйвера, используемый для взаимодействия с файловой системой.
+    /// @return Fs<D> - новый инициализированный экземпляр клиента.
     pub fn new(driver: D) -> Self {
         Self {
+            // Драйвер для доступа к файловой системе.
             driver: Box::new(driver),
+            // Уникальный идентификатор клиента + номер клона. При каждом клонировании номер клона будет инкрементироваться.
             uuid: FsUuid::default(),
         }
     }
