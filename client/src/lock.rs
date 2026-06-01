@@ -248,6 +248,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// Попытка снять блокировку от имени текущего uuid.
     ///
     /// @return Result<()> - Результат: успех или ошибка
+    #[instrument(level = "debug", skip(self))]
     fn try_unlock(&mut self) -> Result<(), DriverError> {
         self.parent_dir_mast_exists()?;
 
@@ -259,6 +260,7 @@ impl<'a, D: Driver> Lock<'a, D> {
         self.hash = hash;
         self.modified_time = modified_time;
 
+        debug!(?self.fs.uuid, "Убираем uuid из списка блокировки");
         lock_info.remove(self.fs);
         self.write(lock_info)
     }
@@ -302,6 +304,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// При неудаче используется стратегия Backoff
     ///
     /// @return Result<()> - Результат: успех или ошибка
+    #[instrument(level = "debug", skip(self))]
     fn retry_unlock(&mut self) -> Result<(), DriverError> {
         self.parent_dir_mast_exists()?;
 
