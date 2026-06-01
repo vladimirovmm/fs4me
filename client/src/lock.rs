@@ -235,27 +235,6 @@ impl<'a, D: Driver> Lock<'a, D> {
         self.write(lock_info)
     }
 
-    /// Попытка блокировки файла/директории для чтения/записи в течение 30 секунд.
-    ///
-    /// @param path - Путь к файлу или директории.
-    /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
-    /// @return Result<()> - Результат: успех или ошибка
-    fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
-        let start = Instant::now();
-
-        self.parent_dir_mast_exists()?;
-
-        loop {
-            let result = self.try_lock(mode);
-            // Либо успех, либо время вышло
-            if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
-                return result;
-            }
-
-            sleep(Duration::from_millis(250));
-        }
-    }
-
     /// Попытка снять блокировку от имени текущего uuid.
     ///
     /// @return Result<()> - Результат: успех или ошибка
@@ -274,13 +253,49 @@ impl<'a, D: Driver> Lock<'a, D> {
         self.write(lock_info)
     }
 
+    /// Попытка блокировки файла/директории для чтения/записи в течение 30 секунд.
+    /// При неудаче используется стратегия Backoff
+    ///
+    /// @param path - Путь к файлу или директории.
+    /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
+    /// @return Result<()> - Результат: успех или ошибка
+    fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
+        self.parent_dir_mast_exists()?;
+
+        // Время начала. От этого момента будет отсчитываться 30 секунд
+        let start = Instant::now();
+        // Интервал между повторами
+        let mut interval = Duration::from_millis(100);
+
+        loop {
+            let result = self.try_lock(mode);
+            // Либо успех, либо время вышло
+            if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
+                return result;
+            }
+
+            if interval.as_secs_f64() < 3.0 {
+                interval *= 2;
+            } else {
+                interval = Duration::from_secs(1);
+            }
+
+            let jitter = Duration::from_millis(rand::random_range(0..250));
+            sleep(interval + jitter);
+        }
+    }
+
     /// Снять блокировку от имени текущего uuid.
+    /// При неудаче используется стратегия Backoff
     ///
     /// @return Result<()> - Результат: успех или ошибка
     fn retry_unlock(&mut self) -> Result<(), DriverError> {
-        let start = Instant::now();
-
         self.parent_dir_mast_exists()?;
+
+        // Время начала. От этого момента будет отсчитываться 30 секунд
+        let start = Instant::now();
+        // Интервал между повторами
+        let mut interval = Duration::from_millis(100);
 
         loop {
             let result = self.try_unlock();
@@ -289,7 +304,14 @@ impl<'a, D: Driver> Lock<'a, D> {
                 return result;
             }
 
-            sleep(Duration::from_millis(250));
+            if interval.as_secs_f64() < 3.0 {
+                interval *= 2;
+            } else {
+                interval = Duration::from_secs(1);
+            }
+
+            let jitter = Duration::from_millis(rand::random_range(0..250));
+            sleep(interval + jitter);
         }
     }
 }
