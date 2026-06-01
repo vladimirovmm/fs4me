@@ -2,7 +2,6 @@ use fs4me_interface::{Driver, DriverError, WriteMode};
 use rand::{RngExt, distr::Alphanumeric};
 use std::{
     fmt::{Debug, Display},
-    hash::{Hash, Hasher},
     io,
     path::{Path, PathBuf},
     str::FromStr,
@@ -29,7 +28,7 @@ pub fn parent_dir(path: &Path) -> Result<&Path, DriverError> {
 ///
 /// @param path Путь к файлу.
 /// @returns Путь к файлу блокировки.
-pub fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
+pub fn path_to_lock_file<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     let path = path.as_ref();
     let parent = parent_dir(path)?;
     let file_name = path
@@ -51,7 +50,7 @@ pub fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
 /// @param path Путь к файлу.
 /// @returns Путь к временному файлу блокировки.
 pub fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
-    let mut path = lock_path(path)?;
+    let mut path = path_to_lock_file(path)?;
     let mut rng = rand::rng();
     path.set_file_name(format!(
         "{}.{}",
@@ -181,7 +180,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @return Возвращает `Ok` с информацией о блокировке, или `Err` в случае ошибки.
     #[instrument(level = "debug", skip(self))]
     fn read(&self) -> Result<LockInfoRead, DriverError> {
-        let lock_file = lock_path(&self.source_path)?;
+        let lock_file = path_to_lock_file(&self.source_path)?;
         debug!(?lock_file);
 
         if !self.fs.exists(&lock_file) {
@@ -219,48 +218,77 @@ impl<'a, D: Driver> Lock<'a, D> {
         })
     }
 
+    /// Используется для метода write, если нужно записать новое содержимое
+    #[instrument(level = "debug", skip(self))]
+    fn write_from_replace(&self, tmp_path: &Path, lock_content: String) -> Result<(), DriverError> {
+        // Записываем строку в lock файл
+        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::FailIfExists)?;
+        lock_writer
+            .write_all(lock_content.as_bytes())
+            .map_err(|err| DriverError::WriteError {
+                path: tmp_path.to_path_buf(),
+                reason: err.to_string(),
+            })?;
+        lock_writer.flush().map_err(|err| DriverError::WriteError {
+            path: tmp_path.to_path_buf(),
+            reason: err.to_string(),
+        })?;
+        drop(lock_writer);
+
+        let path = path_to_lock_file(&self.source_path)?;
+        let LockInfoRead {
+            modified_time,
+            hash,
+            ..
+        } = self.read()?;
+        // Убеждаемся, что блокировка не была изменена другими клиентами
+        if self.hash != hash || self.modified_time != modified_time {
+            return Err(DriverError::LockChangedError(path));
+        }
+        // Перемещаем временный файл в окончательное место
+        self.fs.driver.mv(tmp_path, &path)
+    }
+
+    /// Используется для метода write, если содержимое блокировки пустое.
+    /// Это означает, что все блокировки сняты, и файл блокировки больше не нужен.
+    #[instrument(level = "debug", skip_all)]
+    fn drop_lock(&self) -> Result<(), DriverError> {
+        let lock_path = path_to_lock_file(&self.source_path)?;
+        if !self.fs.exists(&lock_path) {
+            // Файл блокировки больше не существует, удалять его не нужно
+            warn!(?lock_path, "Попытка снятия несуществующей блокировки");
+            return Ok(());
+        }
+        let LockInfoRead {
+            modified_time,
+            hash,
+            ..
+        } = self.read()?;
+        // Убеждаемся, что блокировка не была изменена другими клиентами
+        if self.hash != hash || self.modified_time != modified_time {
+            return Err(DriverError::LockChangedError(lock_path));
+        }
+        // Удаляем файл блокировки
+        self.fs.driver.rm(&lock_path)
+    }
+
     /// Записывает информацию о блокировке файла или директории.
     ///
     /// @param lock - Информация о блокировке.
     /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
     fn write(&self, lock: LockInfo) -> Result<(), DriverError> {
-        // Создаем временный файл для записи блокировки
+        if lock.is_empty() {
+            // Блокировок нет больше, удаляем файл блокировки
+            return self.drop_lock();
+        }
+        // Путь до временного файла блокировки.
+        // Данные будут записаны в этот файл, после чего он будет атомарно перемещён на место основного файла блокировки.
         let tmp_path = tmp_lock_path(&self.source_path)?;
+
         // Преобразуем структуру LockStat в строку
         let lock_content = lock.to_string();
 
-        // @todo проверить если пустой lock файл то удалить
-
-        // Перемещаем временный файл в окончательное место
-        (|| {
-	        // Записываем строку в lock файл
-	        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::FailIfExists)?;
-	        lock_writer
-	            .write_all(lock_content.as_bytes())
-	            .map_err(|err| DriverError::WriteError {
-	                path: tmp_path.clone(),
-	                reason: err.to_string(),
-	            })?;
-	        lock_writer.flush().map_err(|err| DriverError::WriteError {
-	            path: tmp_path.clone(),
-	            reason: err.to_string(),
-	        })?;
-	        drop(lock_writer);
-
-            let path = lock_path(&self.source_path)?;
-            let LockInfoRead {
-                modified_time,
-                hash,
-                ..
-            } = self.read()?;
-            // Убеждаемся, что блокировка не была изменена другими клиентами
-            if self.hash != hash || self.modified_time != modified_time {
-                return Err(DriverError::LockChangedError(path));
-            }
-            // Перемещаем временный файл в окончательное место
-            self.fs.driver.mv(&tmp_path, &path)
-        })()
-        .map_err(|err| {
+        self.write_from_replace(&tmp_path, lock_content).map_err(|err| {
             // Удаляем временный файл в случае ошибки
             if self.fs.exists(&tmp_path) && let Err(err_rm) = self.fs.rm(tmp_path) {
                 error!("Ошибка при удалении временного файла блокировки: {err_rm}. Причина удаления временного файла: {err}");
@@ -386,7 +414,7 @@ impl Display for LockMode {
 #[cfg(test)]
 mod tests {
 
-    use super::lock_path;
+    use super::path_to_lock_file;
     use std::path::PathBuf;
     use tracing_test::traced_test;
 
@@ -398,7 +426,7 @@ mod tests {
             ("a/b/.c.txt", "a/b/.c.txt.lock"),
             ("a/b/txt", "a/b/.txt.lock"),
         ] {
-            let lock_path = lock_path(path).unwrap();
+            let lock_path = path_to_lock_file(path).unwrap();
             assert_eq!(lock_path, PathBuf::from(expected));
         }
     }
