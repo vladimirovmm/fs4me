@@ -6,7 +6,7 @@ use std::{
 };
 use tracing::{debug, error, instrument};
 
-pub(crate) mod lock;
+pub mod lock;
 pub(crate) mod trash;
 pub(crate) mod uuid;
 

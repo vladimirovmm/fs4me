@@ -18,7 +18,7 @@ use crate::{Fs, uuid::FsUuid};
 ///
 /// @param path Путь к файлу/директории.
 /// @returns Путь к родительской директории.
-fn parent_dir(path: &Path) -> Result<&Path, DriverError> {
+pub fn parent_dir(path: &Path) -> Result<&Path, DriverError> {
     path.parent()
         .ok_or_else(|| DriverError::ParentDirError(path.to_path_buf()))
 }
@@ -27,7 +27,7 @@ fn parent_dir(path: &Path) -> Result<&Path, DriverError> {
 ///
 /// @param path Путь к файлу.
 /// @returns Путь к файлу блокировки.
-pub(crate) fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
+pub fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     let path = path.as_ref();
     let parent = parent_dir(path)?;
     let file_name = path
@@ -48,7 +48,7 @@ pub(crate) fn lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError>
 ///
 /// @param path Путь к файлу.
 /// @returns Путь к временному файлу блокировки.
-fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
+pub fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     let mut path = lock_path(path)?;
     let mut rng = rand::rng();
     path.set_file_name(format!(
