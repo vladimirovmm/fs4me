@@ -1,9 +1,10 @@
 use rand::{RngExt, distr::Alphanumeric};
 use std::time::SystemTime;
+use tempfile::TempDir;
 use tracing::debug;
 use tracing_test::traced_test;
 
-use fs4me_client::Fs;
+use fs4me_client::{Fs, lock::path_to_lock_file};
 use fs4me_interface::{Driver, Stat};
 use fs4me_local::LocalDriver;
 
@@ -111,7 +112,7 @@ fn test_mkdir() {
 #[traced_test]
 fn test_mv() {
     let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
-    let root = tempfile::tempdir().unwrap();
+    let root = TempDir::with_prefix("test_mv_").unwrap();
 
     let root_path = root.path();
     debug!(?root_path);
@@ -133,4 +134,22 @@ fn test_mv() {
 
     assert!(fs.exists(&dst), "директория dst должна быть создана");
     assert!(!fs.exists(&src), "директория src не должна существовать");
+
+    debug!("Проверка на lock-файлы. Они должны быть удалены по завершению операции");
+    for path in [&src, &dst] {
+        debug!(?path, "ищем lock-файлы в директории");
+        let lock_file = path_to_lock_file(path).unwrap();
+        assert!(
+            !fs.exists(&lock_file),
+            "lock-файл не должен существовать {lock_file:?}"
+        );
+        let parent = path.parent().unwrap();
+        assert!(
+            !fs.ls(parent)
+                .unwrap()
+                .inspect(|path| debug!(?path))
+                .any(|path| path.display().to_string().contains("lock")),
+            "Lock файл найден"
+        );
+    }
 }
