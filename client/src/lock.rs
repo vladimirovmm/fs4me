@@ -63,6 +63,56 @@ pub fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     Ok(path)
 }
 
+/// Функция для повторения попыток блокировки и разблокировки
+/// Время на для повторения 30 секунд
+///
+/// @param `retry_fn` - функция, которая будет повторяться.
+/// @returns результат повторений.
+#[instrument(level = "debug", skip_all)]
+fn retry<F>(mut retry_fn: F) -> Result<(), DriverError>
+where
+    F: FnMut() -> Result<(), DriverError>,
+{
+    // Время начала. От этого момента будет отсчитываться 30 секунд
+    let start = Instant::now();
+    // Интервал между повторами
+    let mut interval = Duration::from_millis(100);
+    // Максимальное время для повторений. 30 секунд.
+    let limit_secs = Duration::from_secs(30);
+
+    loop {
+        let result = retry_fn();
+        debug!(?result);
+
+        // При данных ошибках не повторять попытку
+        // Причины прекратить повторение:
+        // - При отсутствии родительской директории
+        // - Если не удалось получить имя файла
+        if let Err(err) = &result
+            && matches!(
+                err,
+                DriverError::ParentDirError(..) | DriverError::FileNameError(..)
+            )
+        {
+            return result;
+        }
+
+        // Либо успех, либо время вышло
+        if result.is_ok() || start.elapsed() > limit_secs {
+            return result;
+        }
+
+        if interval.as_secs_f64() < 3.0 {
+            interval *= 2;
+        } else {
+            interval = Duration::from_secs(1);
+        }
+
+        let jitter = Duration::from_millis(rand::random_range(0..250));
+        sleep(interval + jitter);
+    }
+}
+
 pub struct Lock<'a, D: Driver> {
     /// Клиент для работы с файловой системой.
     fs: &'a Fs<D>,
@@ -273,31 +323,10 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @return Result<()> - Результат: успех или ошибка
     #[instrument(level = "debug", skip(self))]
     fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
-        self.parent_dir_mast_exists()?;
-
-        // Время начала. От этого момента будет отсчитываться 30 секунд
-        let start = Instant::now();
-        // Интервал между повторами
-        let mut interval = Duration::from_millis(100);
-
-        loop {
-            let result = self.try_lock(mode);
-            debug!(?result);
-
-            // Либо успех, либо время вышло
-            if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
-                return result;
-            }
-
-            if interval.as_secs_f64() < 3.0 {
-                interval *= 2;
-            } else {
-                interval = Duration::from_secs(1);
-            }
-
-            let jitter = Duration::from_millis(rand::random_range(0..250));
-            sleep(interval + jitter);
-        }
+        retry(|| -> Result<(), DriverError> {
+            // Максимальное время ожидания
+            self.try_lock(mode)
+        })
     }
 
     /// Снять блокировку от имени текущего uuid.
@@ -306,29 +335,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @return Result<()> - Результат: успех или ошибка
     #[instrument(level = "debug", skip(self))]
     fn retry_unlock(&mut self) -> Result<(), DriverError> {
-        self.parent_dir_mast_exists()?;
-
-        // Время начала. От этого момента будет отсчитываться 30 секунд
-        let start = Instant::now();
-        // Интервал между повторами
-        let mut interval = Duration::from_millis(100);
-
-        loop {
-            let result = self.try_unlock();
-            // Либо успех, либо время вышло
-            if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
-                return result;
-            }
-
-            if interval.as_secs_f64() < 3.0 {
-                interval *= 2;
-            } else {
-                interval = Duration::from_secs(1);
-            }
-
-            let jitter = Duration::from_millis(rand::random_range(0..250));
-            sleep(interval + jitter);
-        }
+        retry(|| -> Result<(), DriverError> { self.try_unlock() })
     }
 }
 

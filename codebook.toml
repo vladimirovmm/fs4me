@@ -7,3 +7,4 @@ words = [
     "clippy",
     "Dwarnings",
 ]
+ignore_paths = ["client/tests/integration_tests.rs"]
