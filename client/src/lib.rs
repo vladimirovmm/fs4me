@@ -4,7 +4,7 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
-use tracing::error;
+use tracing::{debug, error, instrument};
 
 pub(crate) mod lock;
 pub(crate) mod trash;
@@ -110,17 +110,26 @@ impl<D: Driver> Fs<D> {
     /// @param from - Исходный путь.
     /// @param to - Целевой путь.
     /// @return Result<()> - Результат: успех или ошибка
-    pub fn mv<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), DriverError> {
-        let to = to.as_ref();
+    ///
+    #[instrument(level = "debug", skip(self))]
+    pub fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+        Q: AsRef<Path> + Debug,
+    {
         let from = from.as_ref();
+        let to = to.as_ref();
 
         // Блокируем исходный и целевой файлы/директории для записи
         // Проверка на наличие родительской директории происходит в блокировке
         // Разблокируется автоматически по выходе из области видимости
+        debug!(?from, "Блокируем");
         let _from_lock = Lock::try_from(self, from, LockMode::Write)?;
+        debug!(?to, "Блокируем");
         let _to_lock = Lock::try_from(self, to, LockMode::Write)?;
 
         // Перемещаем файл/директорию
+        debug!("Перемещаем from->to");
         self.driver.mv(from, to)?;
 
         Ok(())

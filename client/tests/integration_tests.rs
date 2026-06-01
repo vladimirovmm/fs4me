@@ -11,7 +11,7 @@ use fs4me_local::LocalDriver;
 #[test]
 #[traced_test]
 fn test_driver_info() {
-    let fs: Fs<_> = LocalDriver::connect("").unwrap().into();
+    let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
     let info_string = fs.driver_info();
     assert!(
         info_string.contains("fs4me-local"),
@@ -23,7 +23,7 @@ fn test_driver_info() {
 #[test]
 #[traced_test]
 fn test_time() {
-    let fs: Fs<_> = LocalDriver::connect("").unwrap().into();
+    let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
     let time = fs.time().unwrap();
     assert!(time > 0, "время сервера должно быть больше 0");
 
@@ -41,7 +41,7 @@ fn test_time() {
 #[test]
 #[traced_test]
 fn test_exists() {
-    let fs: Fs<_> = LocalDriver::connect("").unwrap().into();
+    let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
     assert!(fs.exists("."), "файл или директория не должно существовать");
 
     let rand_string = rand::rng()
@@ -74,7 +74,7 @@ fn test_stat_ls() {
 #[test]
 #[traced_test]
 fn test_mkdir() {
-    let fs: Fs<_> = LocalDriver::connect("").unwrap().into();
+    let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
     let root = tempfile::tempdir().unwrap();
     let root_path = root.path();
 
@@ -110,13 +110,25 @@ fn test_mkdir() {
 #[test]
 #[traced_test]
 fn test_mv() {
-    let fs: Fs<_> = LocalDriver::connect("").unwrap().into();
+    let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
     let root = tempfile::tempdir().unwrap();
-    let root_path = root.path();
-    let src = root_path.join("src");
-    let dst = root_path.join("dst");
 
+    let root_path = root.path();
+    debug!(?root_path);
+
+    let src = root_path.join("src");
+    debug!(?src);
+
+    let dst = root_path.join("dst");
+    debug!(?dst);
+
+    debug!(?src, "Создание директории");
     fs.mkdir(&src, true).unwrap();
+
+    debug!(?src, "Проверка на существование директории");
+    assert!(fs.exists(&src), "Директория src должна быть создана");
+
+    debug!("Перемещение src->dst");
     fs.mv(&src, &dst).unwrap();
 
     assert!(fs.exists(&dst), "директория dst должна быть создана");

@@ -60,6 +60,9 @@ pub enum DriverError {
     #[error("Ошибка при блокировке. Путь: {path:?}. Режим: {mode:?}")]
     LockedError { path: PathBuf, mode: String },
 
+    #[error("Ошибка при блокировке. Временная блокировка уже существует. Путь: {0:?}")]
+    TempLockExistsError(PathBuf),
+
     #[error("Ошибка при блокировке. Блокировка была изменена. Путь: {0}.")]
     LockChangedError(PathBuf),
 

@@ -2,7 +2,7 @@ use fs4me_interface::{Driver, DriverError, WriteMode};
 use rand::{RngExt, distr::Alphanumeric};
 use std::{
     collections::VecDeque,
-    fmt::Display,
+    fmt::{Debug, Display},
     hash::{DefaultHasher, Hash, Hasher},
     io,
     path::{Path, PathBuf},
@@ -10,7 +10,7 @@ use std::{
     thread::sleep,
     time::{Duration, Instant},
 };
-use tracing::error;
+use tracing::{debug, error, instrument, warn};
 
 use crate::{Fs, uuid::FsUuid};
 
@@ -91,11 +91,11 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @param path - Путь к файлу или директории.
     /// @param mode - Режим блокировки.
     /// @return Возвращает `Ok` с блокировкой в случае успеха, или `Err` в случае ошибки.
-    pub fn try_from<P: AsRef<Path>>(
-        fs: &'a Fs<D>,
-        path: P,
-        mode: LockMode,
-    ) -> Result<Self, DriverError> {
+    #[instrument(level = "debug", skip(fs))]
+    pub fn try_from<P>(fs: &'a Fs<D>, path: P, mode: LockMode) -> Result<Self, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         let path = path.as_ref();
         let mut lock = Self {
             fs,
@@ -111,11 +111,14 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// Проверяет, существует ли родительская директория для указанного пути.
     ///
     /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+    #[instrument(level = "debug", skip(self))]
     fn parent_dir_mast_exists(&self) -> Result<(), DriverError> {
         parent_dir(&self.source_path).and_then(|path| {
             if self.fs.exists(path) {
+                debug!("Родительская директория существует: {path:?}");
                 Ok(())
             } else {
+                warn!("Родительская директория не существует: {path:?}");
                 Err(DriverError::ParentDirError(self.source_path.clone()))
             }
         })
@@ -124,13 +127,18 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// Возвращает информацию о блокировке файла или директории.
     ///
     /// @return Возвращает `Ok` с информацией о блокировке, или `Err` в случае ошибки.
+    #[instrument(level = "debug", skip(self))]
     fn read(&self) -> Result<LockInfoRead, DriverError> {
         let lock_file = lock_path(&self.source_path)?;
-        if self.fs.exists(&lock_file) {
+        debug!(?lock_file);
+
+        if !self.fs.exists(&lock_file) {
+            debug!(?lock_file, "Блокировки не существует");
             // Если lock файл не существует, возвращаем пустую структуру LockStat
             return Ok(LockInfoRead::default());
         }
 
+        debug!(?lock_file, "Читаем файл блокировки");
         // Читаем содержимое lock файла
         let lock_reader = self.fs.driver.read(&lock_file, 0)?;
         let lock_content =
@@ -211,10 +219,12 @@ impl<'a, D: Driver> Lock<'a, D> {
     ///
     /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
     /// @return Result<()> - Результат: успех или ошибка
+    #[instrument(level = "debug", skip(self))]
     fn try_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         self.parent_dir_mast_exists()?;
 
         if matches!(mode, LockMode::Write) {
+            debug!("Перед блокировкой на запись нужно встать в очередь");
             self.try_lock(LockMode::WriteQueue)?;
         }
 
@@ -259,6 +269,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @param path - Путь к файлу или директории.
     /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
     /// @return Result<()> - Результат: успех или ошибка
+    #[instrument(level = "debug", skip(self))]
     fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         self.parent_dir_mast_exists()?;
 
@@ -269,6 +280,8 @@ impl<'a, D: Driver> Lock<'a, D> {
 
         loop {
             let result = self.try_lock(mode);
+            debug!(?result);
+
             // Либо успех, либо время вышло
             if result.is_ok() || start.elapsed() > Duration::from_secs(30) {
                 return result;
