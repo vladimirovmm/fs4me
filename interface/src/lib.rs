@@ -89,7 +89,9 @@ pub trait Driver: Sized + Clone {
     ///     println!("{:?}", entry);
     /// }
     /// ```
-    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = PathBuf>, DriverError>;
+    fn ls<P>(&self, path: P) -> Result<impl Iterator<Item = PathBuf>, DriverError>
+    where
+        P: AsRef<Path> + Debug;
 
     /// Получить инофрмацию о файле/директории.
     ///
@@ -101,40 +103,43 @@ pub trait Driver: Sized + Clone {
     /// @param from - Исходный путь.
     /// @param to - Целевой путь.
     /// @return Result<()> - Результат: успех или ошибка
-    fn mv<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), DriverError>;
+    fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+        Q: AsRef<Path> + Debug;
 
     /// Создает директорию.
     ///
     /// @param path - Путь к директории.
     /// @param recursive - Рекурсивное создание. Создает все промежуточные директории.
     /// @return Result<()> - Результат: успешное создание или ошибка.
-    fn mkdir<P: AsRef<Path>>(&self, path: P, recursive: bool) -> Result<(), DriverError>;
+    fn mkdir<P>(&self, path: P, recursive: bool) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug;
 
     /// Удаляет директорию/файл.
     ///
     /// @param path - Путь к директории.
     /// @return Result<()> - Результат: успешное удаление или ошибка.
-    fn rm<P: AsRef<Path>>(&self, path: P) -> Result<(), DriverError>;
+    fn rm<P>(&self, path: P) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug;
 
     /// Записывает данные в файл. Есть несколько режимов записи.
     ///
     /// @param path - Путь к файлу.
     /// @param mode - Режим записи.
     /// @return Result<Box<dyn io::Write>> - Результат: успешная запись или ошибка.
-    fn write<P: AsRef<Path>>(
-        &self,
-        path: &P,
-        mode: WriteMode,
-    ) -> Result<Box<dyn io::Write>, DriverError>;
+    fn write<P>(&self, path: &P, mode: WriteMode) -> Result<Box<dyn io::Write>, DriverError>
+    where
+        P: AsRef<Path> + Debug;
 
     /// Читает данные из файла.
     ///
     /// @param path - Путь к файлу.
     /// @param position - Позиция в файле, с которой начать чтение.
     /// @return Result<Box<dyn io::Read>> - Результат: успешное чтение или ошибка.
-    fn read<P: AsRef<Path>>(
-        &self,
-        path: &P,
-        position: u64,
-    ) -> Result<Box<dyn io::Read>, DriverError>;
+    fn read<P>(&self, path: &P, position: u64) -> Result<Box<dyn io::Read>, DriverError>
+    where
+        P: AsRef<Path> + Debug;
 }
