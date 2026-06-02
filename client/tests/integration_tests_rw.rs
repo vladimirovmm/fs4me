@@ -30,25 +30,25 @@ fn tests_rw() {
     {
         info!("Открываем файл для записи");
         let mut file = fs.write(&file_path, WriteMode::FailIfExists).unwrap();
-        assert!(
-            fs.exists(&lock_file),
-            "Пока работа с файлом не завершена, должен существовать файл блокировки {lock_file:?}"
-        );
         file.write_all(test_data).unwrap();
 
         info!("Завершаем запись");
         file.flush().unwrap();
+        assert!(
+            fs.exists(&lock_file),
+            "Пока работа с файлом не завершена, должен существовать файл блокировки {lock_file:?}"
+        );
     }
-    // Блокировка должна быть снята
-    assert!(
-        !fs.exists(&lock_file),
-        "Блокировка должна быть снята {lock_file:?}"
-    );
 
     // Проверка что файл существует после записи
     assert!(
         fs.exists(&file_path),
         "Файл должен существовать после записи"
+    );
+    // Блокировка должна быть снята
+    assert!(
+        !fs.exists(&lock_file),
+        "Блокировка должна быть снята {lock_file:?}"
     );
 
     // Проверка информации о файле через stat
@@ -67,19 +67,21 @@ fn tests_rw() {
             buffer, test_data,
             "Чтение данных должно совпадать с записанными"
         );
+        assert!(
+            fs.exists(&lock_file),
+            "Блокировка должна существовать {lock_file:?}"
+        )
     }
 
     // Проверка корректности lock-файлов
-    {
-        assert!(!fs.exists(&lock_file), "Lock-файл не должен существовать");
-        let parent = lock_file.parent().unwrap();
-        assert!(
-            !fs.ls(parent)
-                .unwrap()
-                .any(|p| p.display().to_string().contains("lock")),
-            "Lock файлы не должны существовать в родительской директории"
-        );
-    }
+    assert!(!fs.exists(&lock_file), "Lock-файл не должен существовать");
+    let parent = lock_file.parent().unwrap();
+    assert!(
+        !fs.ls(parent)
+            .unwrap()
+            .any(|p| p.display().to_string().contains("lock")),
+        "Временных lock-файлов не должно существовать в родительской директории"
+    );
 }
 
 /// Тестирование различных режимов записи
