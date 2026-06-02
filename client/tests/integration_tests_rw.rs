@@ -1,4 +1,10 @@
-use tracing::info;
+use std::{
+    fs, io,
+    thread::{self, sleep},
+    time::Duration,
+};
+
+use tracing::{debug, error, info};
 use tracing_test::traced_test;
 
 use fs4me_client::{Fs, lock::path_to_lock_file};
@@ -164,4 +170,85 @@ fn test_write_modes() {
         file.read_to_end(&mut buffer).unwrap();
         assert_eq!(buffer, b"Overwritten!");
     }
+}
+
+/// Тестирование параллельного чтения
+#[test]
+#[traced_test]
+fn test_parallel_read() {
+    use fs4me_interface::WriteMode;
+    let fs_client: Fs<LocalDriver> = LocalDriver::connect(" ").unwrap().into();
+    let root = tempfile::tempdir().unwrap();
+    let root_path = root.path();
+
+    let file_path = root_path.join("test.txt");
+    let lock_path = path_to_lock_file(&file_path).unwrap();
+    let file_content = "Тестовая запись";
+
+    // Создание файла с тестовым текстом
+    {
+        let mut writer = fs_client
+            .write(&file_path, WriteMode::FailIfExists)
+            .unwrap();
+        writeln!(&mut writer, "{file_content}").unwrap();
+        writer.flush().unwrap();
+    }
+
+    // Создание нескольких потоков чтения одного файла
+    let threads = (0..30)
+        .into_iter()
+        .map(|thread_num| {
+            let fs = fs_client.clone();
+            let file_path = file_path.clone();
+            let lock_path = lock_path.clone();
+            thread::spawn(move || {
+                debug!(?thread_num, "Открытие файла для чтения");
+
+                // Создание буфера чтения файла
+                let mut reader = fs.read(&file_path, 0).unwrap();
+
+                // чтение lock файла чтобы убедиться что записи блокировок добавляются
+                let lock_lines_count = fs::read_to_string(&lock_path)
+                    .inspect_err(|err| error!(?err, "Ошибка при чтении lock файла"))
+                    .unwrap_or_default()
+                    .lines()
+                    .count();
+
+                // Задержка, чтобы другие потоки успели тоже открыть файл для чтения
+                sleep(Duration::from_secs(1));
+
+                // Чтение полностью файла
+                let content = io::read_to_string(&mut reader).unwrap();
+
+                if file_content != content.trim() {
+                    Err("Содержимое файла должно быть равно исходному")
+                } else {
+                    Ok(lock_lines_count)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Ожидание завершения всех потоков
+    let result = threads
+        .into_iter()
+        .map(|thread| thread.join())
+        .collect::<Result<Vec<_>, _>>();
+
+    match result {
+        Ok(results) => {
+            for res in results {
+                let lines_count = res.unwrap();
+                info!(?lines_count, "Количество строк в lock файле");
+            }
+        }
+        Err(err) => {
+            panic!("{err:#?}");
+        }
+    }
+
+    assert!(
+        fs_client.exists(&lock_path),
+        "Файл блокировки должен быть удалён, так как все потоки завершили чтение"
+    );
 }
