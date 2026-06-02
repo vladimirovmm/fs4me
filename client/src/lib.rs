@@ -6,11 +6,13 @@ use std::{
 };
 use tracing::{debug, error, instrument};
 
+pub mod buffer;
 pub mod lock;
 pub(crate) mod trash;
 pub(crate) mod uuid;
 
 use crate::{
+    buffer::{DriverBufferReed, DriverBufferWrite},
     lock::{Lock, LockMode},
     trash::trash_unique_path,
     uuid::FsUuid,
@@ -195,9 +197,11 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для записи.
         // Проверка на наличие родительской директории происходит внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости.
-        let _lock = Lock::try_from(self, path, LockMode::Write)?;
+        let lock = Lock::try_from(self, path, LockMode::Write)?;
 
-        self.driver.write(path, mode)
+        self.driver
+            .write(path, mode)
+            .map(|write| Box::new(DriverBufferWrite { lock, write }) as Box<dyn io::Write>)
     }
 
     /// Читает данные из файла.
@@ -220,8 +224,10 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для чтения.
         // Проверка на наличие родительской директори происход внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости
-        let _lock = Lock::try_from(self, path, LockMode::Read)?;
+        let lock = Lock::try_from(self, path, LockMode::Read)?;
 
-        self.driver.read(path, position)
+        self.driver
+            .read(path, position)
+            .map(|read| Box::new(DriverBufferReed { lock, read }) as Box<dyn io::Read>)
     }
 }
