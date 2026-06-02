@@ -6,11 +6,13 @@ use std::{
 };
 use tracing::{debug, error, instrument};
 
+pub mod buffer;
 pub mod lock;
 pub(crate) mod trash;
 pub(crate) mod uuid;
 
 use crate::{
+    buffer::{DriverBufferReed, DriverBufferWrite},
     lock::{Lock, LockMode},
     trash::trash_unique_path,
     uuid::FsUuid,
@@ -54,6 +56,7 @@ impl<D: Driver> Fs<D> {
     ///
     /// @param driver - экземпляр драйвера, используемый для взаимодействия с файловой системой.
     /// @return Fs<D> - новый инициализированный экземпляр клиента.
+    #[instrument(level = "debug", skip_all)]
     pub fn new(driver: D) -> Self {
         Self {
             // Драйвер для доступа к файловой системе.
@@ -66,6 +69,7 @@ impl<D: Driver> Fs<D> {
     /// Возвращает информацию о драйвере.
     ///
     /// @return Строка с информацией о драйвере.
+    #[instrument(level = "debug", skip_all)]
     pub fn driver_info(&self) -> String {
         self.driver.info()
     }
@@ -73,6 +77,7 @@ impl<D: Driver> Fs<D> {
     /// Возвращает текущее время сервера.
     ///
     /// @return Возвращает `Ok` с текущим временем сервера в формате Unix timestamp, или `Err` в случае ошибки.
+    #[instrument(level = "debug", skip(self))]
     pub fn time(&self) -> Result<u32, DriverError> {
         self.driver.server_time()
     }
@@ -81,7 +86,11 @@ impl<D: Driver> Fs<D> {
     ///
     /// @param path - Путь к файлу или директории.
     /// @return bool - Результат: true, если файл или директория существует, false - если нет.
-    pub fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
+    #[instrument(level = "debug", skip(self))]
+    pub fn exists<P>(&self, path: P) -> bool
+    where
+        P: AsRef<Path> + Debug,
+    {
         self.driver.exists(path)
     }
 
@@ -89,10 +98,11 @@ impl<D: Driver> Fs<D> {
     ///
     /// @param path - Путь к директории.
     /// @return Возвращает `Ok` с итератором по `PathBuf`, или `Err` в случае ошибки.
-    pub fn ls<P: AsRef<Path>>(
-        &self,
-        path: P,
-    ) -> Result<impl Iterator<Item = PathBuf>, DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    pub fn ls<P>(&self, path: P) -> Result<impl Iterator<Item = PathBuf>, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         self.driver.ls(path)
     }
 
@@ -140,7 +150,11 @@ impl<D: Driver> Fs<D> {
     ///
     /// @param path - Путь к директории.
     /// @param recursive - Если `true`, то создается вся цепочка директорий.
-    pub fn mkdir<P: AsRef<Path>>(&self, path: P, recursive: bool) -> Result<(), DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    pub fn mkdir<P>(&self, path: P, recursive: bool) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         self.driver.mkdir(path, recursive)
     }
 
@@ -151,7 +165,11 @@ impl<D: Driver> Fs<D> {
     ///
     /// @param path - Путь к удаляемому файлу или директории.
     /// @return Result<()> - Результат: успешное удаление (перемещение в корзину) или ошибка.
-    pub fn rm<P: AsRef<Path>>(&self, path: P) -> Result<(), DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    pub fn rm<P>(&self, path: P) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         let path = path.as_ref();
         // Путь, куда будет перемещён файл
         let new_path = trash_unique_path(self.driver.as_ref(), path)?;
@@ -164,20 +182,26 @@ impl<D: Driver> Fs<D> {
     /// @param path - Путь к файлу.
     /// @param mode - Режим записи.
     /// @return Result<Box<dyn io::Write>> - Результат: успешная запись или ошибка.
-    pub fn write<P: AsRef<Path>>(
-        &self,
+    #[instrument(level = "debug", skip(self))]
+    pub fn write<'a, P>(
+        &'a self,
         path: &P,
         mode: WriteMode,
-    ) -> Result<Box<dyn io::Write>, DriverError> {
+    ) -> Result<Box<dyn io::Write + 'a>, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         // Нужно проверить что новый путь для перемещения.
         let path = &path.as_ref().to_path_buf();
 
         // Блокируем файл для записи.
         // Проверка на наличие родительской директории происходит внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости.
-        let _lock = Lock::try_from(self, path, LockMode::Write)?;
+        let lock = Lock::try_from(self, path, LockMode::Write)?;
 
-        self.driver.write(path, mode)
+        self.driver
+            .write(path, mode)
+            .map(|write| Box::new(DriverBufferWrite { lock, write }) as Box<dyn io::Write>)
     }
 
     /// Читает данные из файла.
@@ -185,19 +209,25 @@ impl<D: Driver> Fs<D> {
     /// @param path - Путь к файлу.
     /// @param position - Позиция в файле, с которой начать чтение.
     /// @return Result<Box<dyn io::Read>, DriverError> - Результат: успешное чтение или ошибка.
-    pub fn read<P: AsRef<Path>>(
-        &self,
+    #[instrument(level = "debug", skip(self))]
+    pub fn read<'a, P>(
+        &'a self,
         path: &P,
         position: u64,
-    ) -> Result<Box<dyn io::Read>, DriverError> {
+    ) -> Result<Box<dyn io::Read + 'a>, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         // Нужно проверить что новый путь для перемещения.
         let path = &path.as_ref().to_path_buf();
 
         // Блокируем файл для чтения.
         // Проверка на наличие родительской директори происход внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости
-        let _lock = Lock::try_from(self, path, LockMode::Read)?;
+        let lock = Lock::try_from(self, path, LockMode::Read)?;
 
-        self.driver.read(path, position)
+        self.driver
+            .read(path, position)
+            .map(|read| Box::new(DriverBufferReed { lock, read }) as Box<dyn io::Read>)
     }
 }

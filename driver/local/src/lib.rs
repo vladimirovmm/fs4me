@@ -1,10 +1,12 @@
 use fs4me_interface::{Driver, DriverError, DriverParams, Stat, WriteMode};
 use std::{
+    fmt::Debug,
     fs::{self, OpenOptions},
     io::{self, BufWriter, Seek},
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
+use tracing::{debug, instrument};
 
 const DRIVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DRIVER_NAME: &str = env!("CARGO_PKG_NAME");
@@ -48,7 +50,10 @@ impl Driver for LocalDriver {
     /// Проверяет, существует ли путь.
     ///
     /// @return Возвращает true, если путь существует.
-    fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
+    fn exists<P>(&self, path: P) -> bool
+    where
+        P: AsRef<Path>,
+    {
         path.as_ref().exists()
     }
 
@@ -56,7 +61,10 @@ impl Driver for LocalDriver {
     ///
     /// @param path Путь к файлу или директории.
     /// @return Информация о файле или директории.
-    fn stat<P: AsRef<Path>>(&self, path: P) -> Result<Stat, DriverError> {
+    fn stat<P>(&self, path: P) -> Result<Stat, DriverError>
+    where
+        P: AsRef<Path>,
+    {
         let path = path.as_ref();
         let metadata = fs::metadata(path).map_err(|err| DriverError::StatError {
             path: path.to_path_buf(),
@@ -85,7 +93,11 @@ impl Driver for LocalDriver {
     ///
     /// @param path Путь к директории.
     /// @return Итератор по файлам в директории.
-    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = PathBuf>, DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    fn ls<P>(&self, path: P) -> Result<impl Iterator<Item = PathBuf>, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         let path = path.as_ref();
         let path: PathBuf =
             path.canonicalize()
@@ -113,7 +125,12 @@ impl Driver for LocalDriver {
     /// @param from Исходный путь.
     /// @param to Целевой путь.
     /// @return Результат операции.
-    fn mv<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+        Q: AsRef<Path> + Debug,
+    {
         let from = from.as_ref();
         let to = to.as_ref();
         fs::rename(from, to).map_err(|err| DriverError::MvError {
@@ -127,7 +144,11 @@ impl Driver for LocalDriver {
     ///
     /// @param path Путь к директории.
     /// @param recursive Если `true`, то создается директория и все промежуточные директории.
-    fn mkdir<P: AsRef<Path>>(&self, path: P, recursive: bool) -> Result<(), DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    fn mkdir<P>(&self, path: P, recursive: bool) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         let path = path.as_ref();
         if self.exists(path) {
             return Err(DriverError::PathExistsError(path.to_path_buf()));
@@ -149,7 +170,11 @@ impl Driver for LocalDriver {
     ///
     /// @param path Путь к файлу/директории.
     /// @return `Ok` при успешном удалении, `Err` при ошибке.
-    fn rm<P: AsRef<Path>>(&self, path: P) -> Result<(), DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    fn rm<P>(&self, path: P) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         let path = path.as_ref();
         match self.stat(path)? {
             Stat::Dir { .. } => fs::remove_dir_all(path).map_err(|err| DriverError::RmError {
@@ -168,14 +193,15 @@ impl Driver for LocalDriver {
     /// @param path Путь к файлу.
     /// @param position Позиция в файле.
     /// @return `Ok` при успешном чтении, `Err` при ошибке.
-    fn read<P: AsRef<Path>>(
-        &self,
-        path: &P,
-        position: u64,
-    ) -> Result<Box<dyn std::io::Read>, DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    fn read<P>(&self, path: &P, position: u64) -> Result<Box<dyn std::io::Read>, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         // Преобразуем входной путь в ссылаемый путь, чтобы можно было использовать его в отчетах об ошибках
         let path = path.as_ref();
-        // Открываем файл только для чтения
+
+        debug!("Открытие файла только для чтения");
         let mut file = OpenOptions::new()
             .write(false)
             .read(true)
@@ -185,7 +211,8 @@ impl Driver for LocalDriver {
                 path: path.to_path_buf(),
                 reason: err.to_string(),
             })?;
-        // Переходим к указанной позиции в файле
+
+        debug!("Переходим к указанной позиции в файле");
         file.seek(std::io::SeekFrom::Start(position))
             .map_err(|err| DriverError::ReadSeekError {
                 path: path.to_path_buf(),
@@ -194,6 +221,8 @@ impl Driver for LocalDriver {
         // Оборачиваем файловый дескриптор в буферизированный читатель.
         // Буферизация ускоряет операции чтения за счет минимизации системных вызовов I/O.
         let buf_reader = io::BufReader::new(file);
+
+        debug!("Возвращаем буфер для чтения");
         Ok(Box::new(buf_reader))
     }
 
@@ -202,11 +231,11 @@ impl Driver for LocalDriver {
     /// @param path Путь к файлу для записи.
     /// @param mode Режим записи (перезапись или добавление).
     /// @return Буферизированный писатель для записи в файл.
-    fn write<P: AsRef<Path>>(
-        &self,
-        path: &P,
-        mode: WriteMode,
-    ) -> Result<Box<dyn std::io::Write>, DriverError> {
+    #[instrument(level = "debug", skip(self))]
+    fn write<P>(&self, path: &P, mode: WriteMode) -> Result<Box<dyn std::io::Write>, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
         let path = path.as_ref();
         let mut options = OpenOptions::new();
         // Устанавливаем флаг записи; по умолчанию файл создаётся, если его не существует
@@ -219,12 +248,14 @@ impl Driver for LocalDriver {
             WriteMode::Append => options.create(true).append(true), // Создать и добавлять в конец
         };
 
+        debug!("Открытие файла");
         // Открываем файл с указанными опциями. Если ошибка — преобразуем её в DriverError.
         let file = options.open(path).map_err(|err| DriverError::FopenError {
             path: path.to_path_buf(),
             reason: err.to_string(),
         })?;
 
+        debug!("Возвращаем буфер для записи");
         // Оборачиваем дескриптор файла в буферизированный писатель для ускорения I/O
         Ok(Box::new(BufWriter::new(file)))
     }
