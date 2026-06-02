@@ -18,7 +18,7 @@ impl Default for FsUuid {
     fn default() -> Self {
         Self {
             connection_id: random(),
-            copy_id: 1,
+            copy_id: random(),
         }
     }
 }
