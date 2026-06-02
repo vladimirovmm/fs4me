@@ -11,8 +11,7 @@ use fs4me_local::LocalDriver;
 fn tests_rw() {
     let fs: Fs<LocalDriver> = LocalDriver::connect(" ").unwrap().into();
     let root = tempfile::tempdir().unwrap();
-    // let root_path = root.path();
-    let root_path = root.keep();
+    let root_path = root.path();
 
     // Создание файла для записи
     let file_path = root_path.join("test.txt");
