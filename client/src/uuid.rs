@@ -42,7 +42,7 @@ impl Clone for FsUuid {
     fn clone(&self) -> Self {
         Self {
             connection_id: self.connection_id, // Идентификатор подключения
-            copy_id: self.copy_id + 1,         // Номер копии подключения
+            copy_id: random(),                 // Номер копии подключения
         }
     }
 }
