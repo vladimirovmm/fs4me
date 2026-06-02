@@ -99,6 +99,10 @@ impl<'a, D: Driver> LockPath<'a, D> {
             return Err(DriverError::LockFileBLocked(self.block_path.clone()));
         }
 
+        if self.fs.exists(&self.block_path) {
+            // Такое случается, если блокировка чужая продержалась более 30 секунд
+            return Ok(Blocker(self));
+        }
         self.fs
             .driver
             .mv(&self.path, &self.block_path)
