@@ -2,6 +2,7 @@ use std::{
     fmt::Debug,
     io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 mod errors;
@@ -23,16 +24,16 @@ pub enum Stat {
         /// Размер файла.
         size: u64,
         /// Дата последнего изменения файла. Unix timestamp (UTC)
-        modified: u32,
+        modified: Duration,
     },
     Dir {
         /// Дата последнего изменения директории. Unix timestamp (UTC)
-        modified: u32,
+        modified: Duration,
     },
 }
 
 impl Stat {
-    pub fn modified(&self) -> u32 {
+    pub fn modified(&self) -> Duration {
         match self {
             Stat::File { modified, .. } => *modified,
             Stat::Dir { modified } => *modified,
@@ -70,7 +71,7 @@ pub trait Driver: Sized + Clone {
     /// Возвращает время сервера в формате Unix timestamp.
     ///
     /// @return Result<u32> - Результат: Unix timestamp в секундах
-    fn server_time(&self) -> Result<u32, DriverError>;
+    fn server_time(&self) -> Result<Duration, DriverError>;
 
     /// Проверяет существование файла или директории.
     ///

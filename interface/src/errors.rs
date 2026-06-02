@@ -60,6 +60,9 @@ pub enum DriverError {
     #[error("Ошибка при блокировке. Путь: {path:?}. Режим: {mode:?}")]
     LockedError { path: PathBuf, mode: String },
 
+    #[error("Lock файл заблокирован для записи. Путь: {0:?}")]
+    LockFileBLocked(PathBuf),
+
     #[error("Ошибка при блокировке. Временная блокировка уже существует. Путь: {0:?}")]
     TempLockExistsError(PathBuf),
 

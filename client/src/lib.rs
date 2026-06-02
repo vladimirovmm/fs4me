@@ -3,6 +3,7 @@ use std::{
     fmt::Debug,
     io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 use tracing::{debug, error, instrument};
 
@@ -78,7 +79,7 @@ impl<D: Driver> Fs<D> {
     ///
     /// @return Возвращает `Ok` с текущим временем сервера в формате Unix timestamp, или `Err` в случае ошибки.
     #[instrument(level = "debug", skip(self))]
-    pub fn time(&self) -> Result<u32, DriverError> {
+    pub fn time(&self) -> Result<Duration, DriverError> {
         self.driver.server_time()
     }
 

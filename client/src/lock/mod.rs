@@ -1,5 +1,4 @@
 use fs4me_interface::{Driver, DriverError, WriteMode};
-use rand::{RngExt, distr::Alphanumeric};
 use std::{
     fmt::{Debug, Display},
     io,
@@ -11,9 +10,10 @@ use std::{
 use tracing::{debug, error, instrument, warn};
 
 pub(crate) mod lock_info;
+pub mod lock_path;
 
-use crate::Fs;
 use crate::lock::lock_info::{LockInfo, LockInfoRead};
+use crate::{Fs, lock::lock_path::LockPath};
 
 /// Возвращает родительскую директорию для указанного пути.
 ///
@@ -24,44 +24,25 @@ pub fn parent_dir(path: &Path) -> Result<&Path, DriverError> {
         .ok_or_else(|| DriverError::ParentDirError(path.to_path_buf()))
 }
 
-/// Получить путь к файлу блокировки для указанного пути.
+/// Проверяет, существует ли родительская директория для указанного пути.
 ///
-/// @param path Путь к файлу.
-/// @returns Путь к файлу блокировки.
-pub fn path_to_lock_file<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
+/// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+#[instrument(level = "debug", skip(fs))]
+fn parent_dir_mast_exists<D, P>(fs: &Fs<D>, path: P) -> Result<(), DriverError>
+where
+    D: Driver,
+    P: AsRef<Path> + Debug,
+{
     let path = path.as_ref();
-    let parent = parent_dir(path)?;
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| DriverError::FileNameError(path.to_path_buf()))?;
-
-    let new_file_name = if file_name.starts_with(".") {
-        format!("{}.lock", file_name)
-    } else {
-        format!(".{}.lock", file_name)
-    };
-
-    Ok(parent.join(new_file_name))
-}
-
-/// Получить путь к временному файлу блокировки для указанного пути.
-///
-/// @param path Путь к файлу.
-/// @returns Путь к временному файлу блокировки.
-pub fn tmp_lock_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
-    let mut path = path_to_lock_file(path)?;
-    let mut rng = rand::rng();
-    path.set_file_name(format!(
-        "{}.{}",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default(),
-        (0..9)
-            .map(|_| rng.sample(Alphanumeric) as char)
-            .collect::<String>()
-    ));
-    Ok(path)
+    parent_dir(path).and_then(|path| {
+        if fs.exists(path) {
+            debug!("Родительская директория существует: {path:?}");
+            Ok(())
+        } else {
+            warn!("Родительская директория не существует: {path:?}");
+            Err(DriverError::ParentDirError(path.to_path_buf()))
+        }
+    })
 }
 
 /// Функция для повторения попыток блокировки и разблокировки
@@ -77,7 +58,7 @@ where
     // Время начала. От этого момента будет отсчитываться 30 секунд
     let start = Instant::now();
     // Интервал между повторами
-    let mut interval = Duration::from_millis(100);
+    let mut interval = Duration::from_millis(50);
     // Максимальное время для повторений. 30 секунд.
     let limit_secs = Duration::from_secs(30);
 
@@ -103,7 +84,7 @@ where
             return result;
         }
 
-        if interval.as_secs_f64() < 3.0 {
+        if interval.as_secs() < 3 {
             interval *= 2;
         } else {
             interval = Duration::from_secs(1);
@@ -122,7 +103,9 @@ pub struct Lock<'a, D: Driver> {
     /// Хеш содержимого блокировки.
     hash: Option<u64>,
     /// Время последнего изменения блокировки.
-    modified_time: Option<u32>,
+    modified_time: Option<Duration>,
+    /// Для работы с путями файла блокировки
+    lock_path: LockPath<'a, D>,
 }
 
 impl<D: Driver> Display for Lock<'_, D> {
@@ -147,10 +130,11 @@ impl<'a, D: Driver> Lock<'a, D> {
     where
         P: AsRef<Path> + Debug,
     {
-        let path = path.as_ref();
+        let source_path = path.as_ref().to_path_buf();
         let mut lock = Self {
+            lock_path: LockPath::try_form(fs, &source_path)?,
             fs,
-            source_path: path.to_path_buf(),
+            source_path,
             hash: None,
             modified_time: None,
         };
@@ -159,44 +143,28 @@ impl<'a, D: Driver> Lock<'a, D> {
         Ok(lock)
     }
 
-    /// Проверяет, существует ли родительская директория для указанного пути.
-    ///
-    /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
-    #[instrument(level = "debug", skip(self))]
-    fn parent_dir_mast_exists(&self) -> Result<(), DriverError> {
-        parent_dir(&self.source_path).and_then(|path| {
-            if self.fs.exists(path) {
-                debug!("Родительская директория существует: {path:?}");
-                Ok(())
-            } else {
-                warn!("Родительская директория не существует: {path:?}");
-                Err(DriverError::ParentDirError(self.source_path.clone()))
-            }
-        })
-    }
-
     /// Возвращает информацию о блокировке файла или директории.
     ///
     /// @return Возвращает `Ok` с информацией о блокировке, или `Err` в случае ошибки.
     #[instrument(level = "debug", skip(self))]
     fn read(&self) -> Result<LockInfoRead, DriverError> {
-        let lock_file = path_to_lock_file(&self.source_path)?;
-        debug!(?lock_file);
-
-        if !self.fs.exists(&lock_file) {
-            debug!(?lock_file, "Блокировки не существует");
+        if !self.lock_path.exist() {
+            debug!("Блокировка не существует, возвращаем пустую информацию");
             // Если lock файл не существует, возвращаем пустую структуру LockStat
             return Ok(LockInfoRead::default());
         }
 
-        debug!(?lock_file, "Читаем файл блокировки");
+        let path = &self.lock_path.block_path;
+
+        debug!("Читаем файл блокировки");
         // Читаем содержимое lock файла
-        let lock_reader = self.fs.driver.read(&lock_file, 0)?;
+        let lock_reader = self.fs.driver.read(path, 0)?;
         let lock_content =
             io::read_to_string(lock_reader).map_err(|err| DriverError::ReadSeekError {
-                path: lock_file.to_path_buf(),
+                path: self.lock_path.path.clone(),
                 reason: err.to_string(),
             })?;
+
         // Парсим содержимое lock файла в структуру LockStat
         let mut lock_info = LockInfo::from_str(&lock_content)?;
         // Удаляем устаревшие блокировки (unixtime + 5 минут < now)
@@ -205,7 +173,7 @@ impl<'a, D: Driver> Lock<'a, D> {
         // Вычисляем хеш содержимого lock файла
         let hash = Some(lock_info.get_hash());
         // Получаем время последнего изменения lock файла
-        let modified_time = self.fs.stat(&lock_file).ok().map(|stat| stat.modified());
+        let modified_time = self.fs.stat(path).ok().map(|stat| stat.modified());
         if modified_time.is_none() {
             // Если lock файл не существует, возвращаем пустую структуру LockStat
             return Ok(LockInfoRead::default());
@@ -220,13 +188,16 @@ impl<'a, D: Driver> Lock<'a, D> {
 
     /// Используется для метода write, если нужно записать новое содержимое
     #[instrument(level = "debug", skip(self))]
-    fn write_from_replace(&self, tmp_path: &Path, lock_content: String) -> Result<(), DriverError> {
+    fn write_from_replace(&self, lock: LockInfo) -> Result<(), DriverError> {
+        let tmp_path = &self.lock_path.tmp_path;
+
+        debug!(?self.fs.uuid, ?tmp_path, ?lock, "Пишем во временный файл блокировки");
         // Записываем строку в lock файл
-        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::FailIfExists)?;
+        let mut lock_writer = self.fs.driver.write(&tmp_path, WriteMode::Overwrite)?;
         lock_writer
-            .write_all(lock_content.as_bytes())
+            .write_all(lock.to_string().as_bytes())
             .map_err(|err| DriverError::WriteError {
-                path: tmp_path.to_path_buf(),
+                path: tmp_path.clone(),
                 reason: err.to_string(),
             })?;
         lock_writer.flush().map_err(|err| DriverError::WriteError {
@@ -235,66 +206,34 @@ impl<'a, D: Driver> Lock<'a, D> {
         })?;
         drop(lock_writer);
 
-        let path = path_to_lock_file(&self.source_path)?;
-        let LockInfoRead {
-            modified_time,
-            hash,
-            ..
-        } = self.read()?;
-        // Убеждаемся, что блокировка не была изменена другими клиентами
-        if self.hash != hash || self.modified_time != modified_time {
-            return Err(DriverError::LockChangedError(path));
-        }
-        // Перемещаем временный файл в окончательное место
-        self.fs.driver.mv(tmp_path, &path)
+        debug!(
+            "После выхода из области видимости файл блокировки должен быть заменён. См. LockPath"
+        );
+
+        Ok(())
     }
 
     /// Используется для метода write, если содержимое блокировки пустое.
     /// Это означает, что все блокировки сняты, и файл блокировки больше не нужен.
     #[instrument(level = "debug", skip_all)]
     fn drop_lock(&self) -> Result<(), DriverError> {
-        let lock_path = path_to_lock_file(&self.source_path)?;
-        if !self.fs.exists(&lock_path) {
-            // Файл блокировки больше не существует, удалять его не нужно
-            warn!(?lock_path, "Попытка снятия несуществующей блокировки");
-            return Ok(());
-        }
-        let LockInfoRead {
-            modified_time,
-            hash,
-            ..
-        } = self.read()?;
-        // Убеждаемся, что блокировка не была изменена другими клиентами
-        if self.hash != hash || self.modified_time != modified_time {
-            return Err(DriverError::LockChangedError(lock_path));
-        }
+        debug!("Удаляем файл блокировки потому что он пустой");
         // Удаляем файл блокировки
-        self.fs.driver.rm(&lock_path)
+        self.fs.driver.rm(&self.lock_path.block_path)
     }
 
     /// Записывает информацию о блокировке файла или директории.
     ///
     /// @param lock - Информация о блокировке.
     /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+    #[instrument(level = "debug", skip_all)]
     fn write(&self, lock: LockInfo) -> Result<(), DriverError> {
         if lock.is_empty() {
             // Блокировок нет больше, удаляем файл блокировки
             return self.drop_lock();
         }
-        // Путь до временного файла блокировки.
-        // Данные будут записаны в этот файл, после чего он будет атомарно перемещён на место основного файла блокировки.
-        let tmp_path = tmp_lock_path(&self.source_path)?;
-
-        // Преобразуем структуру LockStat в строку
-        let lock_content = lock.to_string();
-
-        self.write_from_replace(&tmp_path, lock_content).map_err(|err| {
-            // Удаляем временный файл в случае ошибки
-            if self.fs.exists(&tmp_path) && let Err(err_rm) = self.fs.rm(tmp_path) {
-                error!("Ошибка при удалении временного файла блокировки: {err_rm}. Причина удаления временного файла: {err}");
-            }
-            err
-        })
+        // Обновляем запись о блокировках
+        self.write_from_replace(lock)
     }
 
     /// Пытается блокировать файл/директорию для чтения/записи.
@@ -303,12 +242,15 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @return Result<()> - Результат: успех или ошибка
     #[instrument(level = "debug", skip(self))]
     fn try_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
-        self.parent_dir_mast_exists()?;
-
         if matches!(mode, LockMode::Write) {
             debug!("Перед блокировкой на запись нужно встать в очередь");
             self.try_lock(LockMode::WriteQueue)?;
         }
+
+        // Создаём уникальный доступ к lock файлу
+
+        let _lock = self.lock_path.try_lock()?;
+        debug!(?self.fs.uuid,"Установлена блокировка");
 
         let LockInfoRead {
             mut lock_info,
@@ -318,12 +260,16 @@ impl<'a, D: Driver> Lock<'a, D> {
         self.hash = hash;
         self.modified_time = modified_time;
 
+        debug!(?lock_info, "ДО");
         lock_info
             .set(self.fs.uuid, self.fs.time()?, mode)
+            .inspect_err(|err| debug!(?self.fs.uuid, ?err))
             .map_err(|_| DriverError::LockedError {
                 path: self.source_path.clone(),
                 mode: mode.to_string(),
             })?;
+        debug!(?lock_info, "ПОСЛЕ");
+
         self.write(lock_info)
     }
 
@@ -332,7 +278,8 @@ impl<'a, D: Driver> Lock<'a, D> {
     /// @return Result<()> - Результат: успех или ошибка
     #[instrument(level = "debug", skip(self))]
     fn try_unlock(&mut self) -> Result<(), DriverError> {
-        self.parent_dir_mast_exists()?;
+        // Создаём уникальный доступ к lock файлу
+        let _lock = self.lock_path.try_lock()?;
 
         let LockInfoRead {
             mut lock_info,
@@ -407,27 +354,6 @@ impl Display for LockMode {
             LockMode::Read => write!(f, "read"),
             LockMode::Write => write!(f, "write"),
             LockMode::WriteQueue => write!(f, "write_queue"),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::path_to_lock_file;
-    use std::path::PathBuf;
-    use tracing_test::traced_test;
-
-    #[test]
-    #[traced_test]
-    fn test_lock_path() {
-        for (path, expected) in [
-            ("a/b/c.txt", "a/b/.c.txt.lock"),
-            ("a/b/.c.txt", "a/b/.c.txt.lock"),
-            ("a/b/txt", "a/b/.txt.lock"),
-        ] {
-            let lock_path = path_to_lock_file(path).unwrap();
-            assert_eq!(lock_path, PathBuf::from(expected));
         }
     }
 }

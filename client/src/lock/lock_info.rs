@@ -4,7 +4,9 @@ use std::{
     fmt::{Debug, Display},
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
+    time::Duration,
 };
+use tracing::debug;
 
 use crate::{lock::LockMode, uuid::FsUuid};
 
@@ -14,7 +16,7 @@ pub(crate) struct LockInfoRead {
     /// Информация о блокировке файла.
     pub lock_info: LockInfo,
     /// Время последнего изменения файла.
-    pub modified_time: Option<u32>,
+    pub modified_time: Option<Duration>,
     /// Хеш файла.
     pub hash: Option<u64>,
 }
@@ -24,11 +26,11 @@ pub(crate) struct LockInfoRead {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LockInfo {
     /// Карта читателей: uuid -> unixtime блокировки
-    read: Vec<(FsUuid, u32)>,
+    read: Vec<(FsUuid, Duration)>,
     /// Карта писателей: uuid -> unixtime блокировки
-    write: Option<(FsUuid, u32)>,
+    write: Option<(FsUuid, Duration)>,
     /// Очередь на запись: список uuid ожидающих блокировки.
-    write_queue: VecDeque<(FsUuid, u32)>,
+    write_queue: VecDeque<(FsUuid, Duration)>,
 }
 
 /// Преобразует текс в структуру `LockStat`.
@@ -77,17 +79,17 @@ impl Display for LockInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Блокировка на чтение
         for (uuid, unixtime) in &self.read {
-            writeln!(f, "{}={}={}", uuid, unixtime, LockMode::Read)?;
+            writeln!(f, "{uuid}={}={}", unixtime.as_nanos(), LockMode::Read)?;
         }
 
         // Блокировка на запись
         if let Some((uuid, unixtime)) = &self.write {
-            writeln!(f, "{}={}={}", uuid, unixtime, LockMode::Write)?;
+            writeln!(f, "{uuid}={}={}", unixtime.as_nanos(), LockMode::Write)?;
         }
 
         // Очередь на запись
         for (uuid, unixtime) in &self.write_queue {
-            writeln!(f, "{}={}={}", uuid, unixtime, LockMode::WriteQueue)?;
+            writeln!(f, "{uuid}={}={}", unixtime.as_nanos(), LockMode::WriteQueue)?;
         }
 
         Ok(())
@@ -109,7 +111,7 @@ impl LockInfo {
     pub fn set<U: AsRef<FsUuid>>(
         &mut self,
         uuid: U,
-        unixtime: u32,
+        unixtime: Duration,
         mode: LockMode,
     ) -> Result<(), ()> {
         let uuid = uuid.as_ref();
@@ -142,7 +144,8 @@ impl LockInfo {
             }
             // Устанавливаем писатель
             LockMode::Write => {
-                if !self.read.is_empty() {
+                if !self.read.is_empty() || self.write.is_some() {
+                    debug!("Нельзя встать на запись");
                     return Err(());
                 }
 
@@ -168,13 +171,14 @@ impl LockInfo {
     ///
     /// @param line Строка для парсинга.
     /// @return Опциональная кортеж `(uuid, unixtime, mode)`, если строка была успешно распаршена.
-    fn parse_line(line: &str) -> Result<Option<(FsUuid, u32, LockMode)>, DriverError> {
+    fn parse_line(line: &str) -> Result<Option<(FsUuid, Duration, LockMode)>, DriverError> {
         let line = line.trim();
         if line.is_empty() {
             return Ok(None);
         }
 
         let parts: Vec<&str> = line.split('=').collect();
+
         if parts.len() != 3 {
             return Err(DriverError::ParseLockError {
                 reason: format!("Неправильный формат строки: {line}"),
@@ -186,11 +190,12 @@ impl LockInfo {
             .map_err(|e| DriverError::ParseLockError {
                 reason: format!("Неверный формат UUID в строке: {line}. {e}"),
             })?;
-        let unixtime = parts[1]
-            .parse::<u32>()
+        let nanos = parts[1]
+            .parse::<u128>()
             .map_err(|e| DriverError::ParseLockError {
-                reason: format!("Неверный формат unixtime в строке: {line}. {e}"),
+                reason: format!("Неверный формат Времени: {line}. {e}"),
             })?;
+        let unixtime = Duration::from_nanos_u128(nanos);
         let mode = LockMode::from_str(parts[2])?;
 
         Ok(Some((uuid, unixtime, mode)))
@@ -199,8 +204,8 @@ impl LockInfo {
     /// Удалить устаревшие блокировки (unixtime + 5 минут < now).
     ///
     /// @param now Текущее unixtime на сервере
-    pub(crate) fn remove_stale(&mut self, now: u32) {
-        let stale_time = now.saturating_sub(5 * 60);
+    pub(crate) fn remove_stale(&mut self, now: Duration) {
+        let stale_time = now.saturating_sub(Duration::from_secs(5 * 60));
         self.read.retain(|(_, unixtime)| *unixtime > stale_time);
         self.write_queue
             .retain(|(_, unixtime)| *unixtime > stale_time);
@@ -233,7 +238,7 @@ impl LockInfo {
 mod tests {
     use crate::{lock::LockInfo, uuid::FsUuid};
 
-    use std::str::FromStr;
+    use std::{str::FromStr, time::Duration};
     use tracing_test::traced_test;
 
     #[test]
@@ -251,12 +256,14 @@ mod tests {
         assert_eq!(lock_stat.to_string().trim(), lock_content.trim());
         assert!(lock_stat.is_empty(), "Блокировка пуста");
 
-        let lock_content = "1234_1=1780118532=read";
+        let lock_content = "1234_1=1780118532000000000=read";
         let lock_stat = LockInfo::from_str(lock_content).unwrap();
         assert_eq!(
             lock_stat,
             LockInfo {
-                read: [(uuid_default, 1780118532)].into_iter().collect(),
+                read: [(uuid_default, Duration::from_secs(1780118532))]
+                    .into_iter()
+                    .collect(),
                 write: None,
                 write_queue: Default::default(),
             }
@@ -264,28 +271,28 @@ mod tests {
         assert_eq!(lock_stat.to_string().trim(), lock_content);
         assert!(!lock_stat.is_empty(), "Блокировка не пуста");
 
-        let lock_content = "1234_1=1780118532=read\n\
-        1234_2=1780118532=read\n\
-        1234_3=1780118532=read";
+        let lock_content = "1234_1=1780118532000000000=read\n\
+        1234_2=1780118532000000000=read\n\
+        1234_3=1780118532000000000=read";
         let lock_stat = LockInfo::from_str(lock_content).unwrap();
         assert_eq!(
             lock_stat,
             LockInfo {
                 read: [
-                    (uuid_default, 1780118532),
+                    (uuid_default, Duration::from_secs(1780118532)),
                     (
                         FsUuid {
                             connection_id: 1234,
                             copy_id: 2,
                         },
-                        1780118532
+                        Duration::from_secs(1780118532)
                     ),
                     (
                         FsUuid {
                             connection_id: 1234,
                             copy_id: 3,
                         },
-                        1780118532
+                        Duration::from_secs(1780118532)
                     ),
                 ]
                 .into_iter()
@@ -298,8 +305,8 @@ mod tests {
         assert_eq!(lock_stat.to_string().trim(), lock_content);
 
         // Вторая запись перезапишет первую, так как активен может быть только один писатель.
-        let lock_content = "1234_1=1780118532=write\n\
-        1234_2=1780118532=write\n";
+        let lock_content = "1234_1=1780118532000000000=write\n\
+        1234_2=1780118532000000000=write\n";
         let lock_stat = LockInfo::from_str(lock_content).unwrap();
         assert_eq!(
             lock_stat,
@@ -310,15 +317,15 @@ mod tests {
                         connection_id: 1234,
                         copy_id: 2,
                     },
-                    1780118532
+                    Duration::from_secs(1780118532)
                 )),
                 write_queue: Default::default(),
             }
         );
 
-        let lock_content = "1234_1=1780118532=write_queue\n\
-        1234_2=1780118532=write_queue\n\
-        1234_3=1780118532=write_queue";
+        let lock_content = "1234_1=1780118532000000000=write_queue\n\
+        1234_2=1780118532000000000=write_queue\n\
+        1234_3=1780118532000000000=write_queue";
         let lock_stat = LockInfo::from_str(lock_content).unwrap();
 
         assert_eq!(
@@ -327,20 +334,20 @@ mod tests {
                 read: Vec::new(),
                 write: None,
                 write_queue: [
-                    (uuid_default, 1780118532),
+                    (uuid_default, Duration::from_secs(1780118532)),
                     (
                         FsUuid {
                             connection_id: 1234,
                             copy_id: 2
                         },
-                        1780118532
+                        Duration::from_secs(1780118532)
                     ),
                     (
                         FsUuid {
                             connection_id: 1234,
                             copy_id: 3
                         },
-                        1780118532
+                        Duration::from_secs(1780118532)
                     ),
                 ]
                 .into_iter()

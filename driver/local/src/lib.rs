@@ -4,7 +4,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{self, BufWriter, Seek},
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    time::{Duration, UNIX_EPOCH},
 };
 use tracing::{debug, instrument};
 
@@ -39,12 +39,10 @@ impl Driver for LocalDriver {
     /// Возвращает текущее время сервера.
     ///
     /// @return Возвращает текущее время в формате Unix timestamp.
-    fn server_time(&self) -> Result<u32, DriverError> {
-        let now = std::time::SystemTime::now()
+    fn server_time(&self) -> Result<Duration, DriverError> {
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| DriverError::ServerTimeError(e.to_string()))?
-            .as_secs() as u32;
-        Ok(now)
+            .map_err(|e| DriverError::ServerTimeError(e.to_string()))
     }
 
     /// Проверяет, существует ли путь.
@@ -77,8 +75,7 @@ impl Driver for LocalDriver {
                 reason: err.to_string(),
             })?
             .duration_since(UNIX_EPOCH)
-            .map_err(|err| DriverError::ServerTimeError(err.to_string()))?
-            .as_secs() as u32;
+            .map_err(|err| DriverError::ServerTimeError(err.to_string()))?;
         if metadata.is_file() {
             Ok(Stat::File {
                 size: metadata.len(),
@@ -133,6 +130,7 @@ impl Driver for LocalDriver {
     {
         let from = from.as_ref();
         let to = to.as_ref();
+        debug!(?from, ?to, "from->to");
         fs::rename(from, to).map_err(|err| DriverError::MvError {
             old_path: from.to_path_buf(),
             new_path: to.to_path_buf(),
@@ -288,7 +286,7 @@ mod tests {
     fn test_time() {
         let driver = LocalDriver::connect(DriverParams::default()).unwrap();
         let server_time = driver.server_time().unwrap();
-        info!("Server time: {server_time}");
+        info!("Server time: {server_time:?}");
         let local_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

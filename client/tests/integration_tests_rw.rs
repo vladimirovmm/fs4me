@@ -1,9 +1,19 @@
-use tracing::info;
+use std::{
+    fs, io,
+    thread::{self, sleep},
+    time::Duration,
+};
+
+use tracing::{debug, error, info};
 use tracing_test::traced_test;
 
-use fs4me_client::{Fs, lock::path_to_lock_file};
+use fs4me_client::{Fs, lock::lock_path::LockPath};
 use fs4me_interface::{Driver, Stat, WriteMode};
 use fs4me_local::LocalDriver;
+
+fn err_to_string<S: ToString>(err: S) -> String {
+    err.to_string()
+}
 
 /// Тестирование на чтение и запись в файл.
 #[test]
@@ -11,8 +21,7 @@ use fs4me_local::LocalDriver;
 fn tests_rw() {
     let fs: Fs<LocalDriver> = LocalDriver::connect(" ").unwrap().into();
     let root = tempfile::tempdir().unwrap();
-    // let root_path = root.path();
-    let root_path = root.keep();
+    let root_path = root.path();
 
     // Создание файла для записи
     let file_path = root_path.join("test.txt");
@@ -24,7 +33,7 @@ fn tests_rw() {
     );
 
     let test_data = b"Hello, Fs4me!";
-    let lock_file = path_to_lock_file(&file_path).unwrap();
+    let lock_file = LockPath::try_form(&fs, &file_path).unwrap().path;
 
     // Запись данных в файл
     {
@@ -75,7 +84,7 @@ fn tests_rw() {
 
     // Проверка корректности lock-файлов
     assert!(!fs.exists(&lock_file), "Lock-файл не должен существовать");
-    let parent = lock_file.parent().unwrap();
+    let parent = &lock_file.parent().unwrap();
     assert!(
         !fs.ls(parent)
             .unwrap()
@@ -165,4 +174,159 @@ fn test_write_modes() {
         file.read_to_end(&mut buffer).unwrap();
         assert_eq!(buffer, b"Overwritten!");
     }
+}
+
+/// Тестирование параллельного чтения
+#[test]
+#[traced_test]
+fn test_parallel_read() {
+    let fs_client: Fs<LocalDriver> = LocalDriver::connect(" ").unwrap().into();
+    let root = tempfile::tempdir().unwrap();
+    let root_path = root.path();
+
+    let file_path = root_path.join("test.txt");
+    let lock_path = LockPath::try_form(&fs_client, &file_path).unwrap().path;
+    let file_content = "Тестовая запись";
+
+    // Создание файла с тестовым текстом
+    {
+        let mut writer = fs_client
+            .write(&file_path, WriteMode::FailIfExists)
+            .unwrap();
+        writeln!(&mut writer, "{file_content}").unwrap();
+        writer.flush().unwrap();
+    }
+
+    // Создание нескольких потоков чтения одного файла
+    let count = 10;
+    let threads = (0..count)
+        .into_iter()
+        .map(|thread_num| {
+            let fs = fs_client.clone();
+            let file_path = file_path.clone();
+            let lock_path = lock_path.clone();
+            thread::spawn(move || {
+                debug!(?thread_num, "Открытие файла для чтения");
+
+                // Создание буфера чтения файла
+                let mut reader = fs.read(&file_path, 0).unwrap();
+
+                // Задержка, чтобы другие потоки успели тоже открыть файл для чтения
+                sleep(Duration::from_secs(1));
+
+                // чтение lock файла чтобы убедиться что записи блокировок добавляются
+                let lock_lines_count = fs::read_to_string(&lock_path)
+                    .inspect_err(|err| error!(?err, "Ошибка при чтении lock файла"))
+                    .unwrap_or_default()
+                    .lines()
+                    .count();
+
+                // Чтение полностью файла
+                let content = io::read_to_string(&mut reader).unwrap();
+
+                if file_content != content.trim() {
+                    Err("Содержимое файла должно быть равно исходному")
+                } else {
+                    Ok(lock_lines_count)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Ожидание завершения всех потоков
+    let result = threads
+        .into_iter()
+        .map(|thread| thread.join())
+        .collect::<Result<Vec<_>, _>>();
+
+    match result {
+        Ok(results) => {
+            let max = results.into_iter().map(|r| r.unwrap()).max().unwrap();
+            assert_eq!(count, max);
+        }
+        Err(err) => {
+            panic!("{err:#?}");
+        }
+    }
+
+    assert!(
+        !fs_client.exists(&lock_path),
+        "Файл блокировки должен быть удалён, так как все потоки завершили чтение"
+    );
+}
+
+/// Тест для проверки очереди на запись
+#[test]
+#[traced_test]
+fn test_write_queue() {
+    let fs_client: Fs<LocalDriver> = LocalDriver::connect(" ").unwrap().into();
+    let root = tempfile::tempdir().unwrap();
+    let root_path = root.path();
+
+    let file_path = root_path.join("test.txt");
+    let lock_path = LockPath::try_form(&fs_client, &file_path).unwrap().path;
+    let count_threads = 5;
+    // Создание нескольких потоков для записи одного файла
+    let threads = (0..count_threads)
+        .into_iter()
+        .map(|thread_num| {
+            let fs = fs_client.clone();
+            let file_path = file_path.clone();
+            let lock_path = lock_path.clone();
+            thread::spawn(move || {
+                debug!(?thread_num, "Открытие файла для чтения");
+
+                debug!(
+                    ?thread_num,
+                    "==== Start ======================================="
+                );
+                // Создание буфера чтения файла
+                let mut writer = fs
+                    .write(&file_path, WriteMode::Append)
+                    .map_err(err_to_string)?;
+                // Задержка, чтобы другие потоки успели тоже открыть файл для чтения
+                debug!(
+                    ?thread_num,
+                    "==== sleep start ======================================="
+                );
+                sleep(Duration::from_secs(1));
+                debug!(
+                    ?thread_num,
+                    "==== sleep end ======================================="
+                );
+
+                // чтение lock файла чтобы убедиться что записи блокировок добавляются
+                let lock_lines_count = fs::read_to_string(&lock_path)
+                    .inspect(|content| debug!(?content))
+                    .inspect_err(|err| error!(?err, "Ошибка при чтении lock файла"))
+                    .unwrap_or_default()
+                    .lines()
+                    .count();
+
+                // Чтение полностью файла
+                writeln!(&mut writer, "{thread_num}").map_err(err_to_string)?;
+
+                debug!(
+                    ?thread_num,
+                    "==== end ======================================="
+                );
+                Ok::<usize, String>(lock_lines_count)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Ожидание завершения всех потоков
+    let results = threads
+        .into_iter()
+        .map(|thread| thread.join())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    let max = results.into_iter().map(|res| res.unwrap()).max().unwrap();
+    assert_eq!(count_threads, max);
+
+    assert!(
+        !fs_client.exists(&lock_path),
+        "Файл блокировки должен быть удалён, так как все потоки завершили запись"
+    );
 }
