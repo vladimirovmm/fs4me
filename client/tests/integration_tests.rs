@@ -112,7 +112,7 @@ fn test_mv() {
     debug!("Проверка на lock-файлы. Они должны быть удалены по завершению операции");
     for path in [&src, &dst] {
         debug!(?path, "ищем lock-файлы в директории");
-        let lock_file = BaseLock::try_form(&fs, path).unwrap();
+        let lock_file = BaseLock::try_form(&fs.uuid, fs.driver.clone(), path).unwrap();
         assert!(
             !fs.exists(&lock_file.path),
             "lock-файл не должен существовать {lock_file:?}"
@@ -155,7 +155,9 @@ fn test_lock() {
         })
         .collect::<Vec<_>>();
 
-    let lock_path = BaseLock::try_form(&fs_client, &src).unwrap().path;
+    let lock_path = BaseLock::try_form(&fs_client.uuid, fs_client.driver.clone(), &src)
+        .unwrap()
+        .path;
     let lock_count_in_file = fs::read_to_string(&lock_path).unwrap().lines().count();
     assert_eq!(count, lock_count_in_file);
 }

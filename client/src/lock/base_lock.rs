@@ -1,22 +1,44 @@
 use fs4me_interface::{Driver, DriverError, WriteMode};
 use rand::{RngExt, distr::Alphanumeric};
 use std::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 use tracing::{debug, instrument, warn};
 
-use crate::{
-    Fs,
-    lock::{parent_dir, parent_dir_mast_exists},
-};
+use crate::lock::parent_dir;
+
+/// Проверяет, существует ли родительская директория для указанного пути.
+///
+/// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+#[instrument(level = "debug", skip(driver))]
+fn parent_dir_mast_exists<D, P>(driver: Arc<D>, path: P) -> Result<(), DriverError>
+where
+    D: Driver,
+    P: AsRef<Path> + Debug,
+{
+    let path = path.as_ref();
+    parent_dir(path).and_then(|path| {
+        if driver.exists(path) {
+            debug!("Родительская директория существует: {path:?}");
+            Ok(())
+        } else {
+            warn!("Родительская директория не существует: {path:?}");
+            Err(DriverError::ParentDirError(path.to_path_buf()))
+        }
+    })
+}
 
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
-pub struct BaseLock<'a, D: Driver> {
-    /// Клиент для работы с файловой системой.
-    fs: &'a Fs<D>,
+pub struct BaseLock<D: Driver> {
+    /// Уникальный идентификатор блокировки клиента (UUID).
+    /// Используется для отображения в логах.
+    uuid: String,
+    /// Драйвер для работы с файловой системой.
+    driver: Arc<D>,
     /// Путь до файла блокировки
     pub path: PathBuf,
     /// Путь до заблокированного lock файла
@@ -32,13 +54,22 @@ pub struct BaseLock<'a, D: Driver> {
     pub tmp_path: PathBuf,
 }
 
-impl<'a, D: Driver> BaseLock<'a, D> {
-    pub fn try_form<P>(fs: &'a Fs<D>, source_path: P) -> Result<Self, DriverError>
+impl<'a, D: Driver> Display for BaseLock<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{:?}", self.uuid, self.path)
+    }
+}
+
+impl<'a, D: Driver> BaseLock<D> {
+    pub fn try_form<P, S>(uuid: S, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
     where
         P: AsRef<Path> + Debug,
+        S: ToString,
     {
+        let uuid = uuid.to_string();
+
         let source_path = source_path.as_ref();
-        parent_dir_mast_exists(fs, source_path)?;
+        parent_dir_mast_exists(driver.clone(), source_path)?;
 
         let parent = parent_dir(source_path)?;
         let source_file_name = source_path
@@ -64,7 +95,8 @@ impl<'a, D: Driver> BaseLock<'a, D> {
         ));
 
         Ok(Self {
-            fs,
+            uuid,
+            driver,
             block_path: block_lock_path,
             path: lock_path,
             tmp_path: tmp_lock_path,
@@ -75,7 +107,7 @@ impl<'a, D: Driver> BaseLock<'a, D> {
     ///
     /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
     pub fn parent_dir_mast_exists(&self) -> Result<(), DriverError> {
-        parent_dir_mast_exists(self.fs, &self.path)
+        parent_dir_mast_exists(self.driver.clone(), &self.path)
     }
 
     /// Блокирует файл блокировки, подготавливая его к последующей записи.
@@ -94,9 +126,9 @@ impl<'a, D: Driver> BaseLock<'a, D> {
     pub fn try_lock(&'a self) -> Result<Blocker<'a, D>, DriverError> {
         self.parent_dir_mast_exists()?;
 
-        if !self.fs.exists(&self.path) && !self.fs.exists(&self.block_path) {
-            debug!(?self.fs.uuid, "Файл блокировки не существует, создаём его");
-            let mut writer = self.fs.driver.write(&self.path, WriteMode::FailIfExists)?;
+        if !self.driver.exists(&self.path) && !self.driver.exists(&self.block_path) {
+            debug!(?self.uuid, "Файл блокировки не существует, создаём его");
+            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExists)?;
             write!(writer, "").map_err(|err| DriverError::WriteError {
                 path: self.path.clone(),
                 reason: err.to_string(),
@@ -111,34 +143,34 @@ impl<'a, D: Driver> BaseLock<'a, D> {
             return Err(DriverError::LockFileBLocked(self.block_path.clone()));
         }
 
-        if self.fs.exists(&self.block_path) {
+        if self.driver.exists(&self.block_path) {
             // Такое случается, если блокировка чужая продержалась более 30 секунд
             return Ok(Blocker(self));
         }
-        self.fs
-            .driver
+        self.driver
             .mv(&self.path, &self.block_path)
-            .inspect(|_| debug!(?self.fs.uuid, "Успешная блокировка файла {:?}", self.path))
-            .inspect_err(|err| debug!(?self.fs.uuid, "Файл блокировки уже занят {err}"))
+            .inspect(|_| debug!(?self.uuid, "Успешная блокировка файла {:?}", self.path))
+            .inspect_err(|err| debug!(?self.uuid, "Файл блокировки уже занят {err}"))
             .map(|_| Blocker(self))
     }
 
     /// Проверка на существование lock-файла
     #[instrument(level = "debug", skip(self))]
     pub fn exist(&self) -> bool {
-        self.fs.exists(&self.path) || self.fs.exists(&self.block_path)
+        self.driver.exists(&self.path) || self.driver.exists(&self.block_path)
     }
 
     /// Проверка на блокировку файла
     #[instrument(level = "debug", skip(self))]
     pub fn is_locked(&self) -> bool {
         // Если файл существует и он не старше 30 секунд, то блокировка установлена
-        self.fs.exists(&self.block_path)
+        self.driver.exists(&self.block_path)
             && self
-                .fs
+                .driver
                 .stat(&self.block_path)
                 .map(|stat| {
-                    stat.modified() + Duration::from_secs(30) >= self.fs.time().unwrap_or_default()
+                    stat.modified() + Duration::from_secs(30)
+                        >= self.driver.time().unwrap_or_default()
                 })
                 .unwrap_or(false)
     }
@@ -146,14 +178,14 @@ impl<'a, D: Driver> BaseLock<'a, D> {
     /// Снятия блокировки
     #[instrument(level = "debug", skip(self))]
     pub fn unlock(&self) -> Result<(), DriverError> {
-        debug!(?self.fs.uuid, "Разблокировка Lock-файла");
-        if self.fs.exists(&self.tmp_path) {
-            self.fs.driver.mv(&self.tmp_path, &self.path)?;
-            if self.fs.exists(&self.block_path) {
-                self.fs.driver.rm(&self.block_path)?;
+        debug!(?self.uuid, "Разблокировка Lock-файла");
+        if self.driver.exists(&self.tmp_path) {
+            self.driver.mv(&self.tmp_path, &self.path)?;
+            if self.driver.exists(&self.block_path) {
+                self.driver.rm(&self.block_path)?;
             }
-        } else if self.fs.exists(&self.block_path) {
-            self.fs.driver.mv(&self.block_path, &self.path)?;
+        } else if self.driver.exists(&self.block_path) {
+            self.driver.mv(&self.block_path, &self.path)?;
         }
 
         Ok(())
@@ -161,14 +193,14 @@ impl<'a, D: Driver> BaseLock<'a, D> {
 
     /// @return Путь до файла блокировки
     pub fn path(&self) -> &Path {
-        if self.fs.driver.exists(&self.block_path) {
+        if self.driver.exists(&self.block_path) {
             return &self.block_path;
         }
         &self.path
     }
 }
 
-pub struct Blocker<'a, D: Driver>(pub(crate) &'a BaseLock<'a, D>);
+pub struct Blocker<'a, D: Driver>(pub(crate) &'a BaseLock<D>);
 
 impl<'a, D: Driver> Drop for Blocker<'a, D> {
     fn drop(&mut self) {

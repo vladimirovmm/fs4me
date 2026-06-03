@@ -3,6 +3,7 @@ use std::{
     fmt::Debug,
     io,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 use tracing::{debug, error, instrument};
@@ -24,9 +25,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Fs<D: Driver> {
     /// Драйвер для доступа к файловой системе.
-    driver: Box<D>,
+    pub driver: Arc<D>,
     /// Индификатор подключения. Нужен для работы с lock файлами.
-    uuid: FsUuid,
+    pub uuid: FsUuid,
 }
 
 /// Вернуть идентификатор клиента.
@@ -61,7 +62,7 @@ impl<D: Driver> Fs<D> {
     pub fn new(driver: D) -> Self {
         Self {
             // Драйвер для доступа к файловой системе.
-            driver: Box::new(driver),
+            driver: Arc::new(driver),
             // Уникальный идентификатор клиента + номер клона. При каждом клонировании номер клона будет инкрементироваться.
             uuid: FsUuid::default(),
         }
@@ -80,7 +81,7 @@ impl<D: Driver> Fs<D> {
     /// @return Возвращает `Ok` с текущим временем сервера в формате Unix timestamp, или `Err` в случае ошибки.
     #[instrument(level = "debug", skip(self))]
     pub fn time(&self) -> Result<Duration, DriverError> {
-        self.driver.server_time()
+        self.driver.time()
     }
 
     /// Проверяет существование файла или директории.

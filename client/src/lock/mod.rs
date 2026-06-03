@@ -105,7 +105,7 @@ pub struct MultiLock<'a, D: Driver> {
     /// Время последнего изменения блокировки.
     modified_time: Option<Duration>,
     /// Для работы с путями файла блокировки
-    lock_path: BaseLock<'a, D>,
+    lock_path: BaseLock<D>,
 }
 
 impl<D: Driver> Display for MultiLock<'_, D> {
@@ -132,7 +132,7 @@ impl<'a, D: Driver> MultiLock<'a, D> {
     {
         let source_path = path.as_ref().to_path_buf();
         let mut lock = Self {
-            lock_path: BaseLock::try_form(fs, &source_path)?,
+            lock_path: BaseLock::try_form(fs.uuid, fs.driver.clone(), &source_path)?,
             fs,
             source_path,
             hash: None,
