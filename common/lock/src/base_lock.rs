@@ -56,6 +56,21 @@ impl TryFrom<&Path> for LockPaths {
     }
 }
 
+impl TryFrom<&PathBuf> for LockPaths {
+    type Error = DriverError;
+
+    fn try_from(source_path: &PathBuf) -> Result<Self, Self::Error> {
+        source_path.as_path().try_into()
+    }
+}
+impl TryFrom<PathBuf> for LockPaths {
+    type Error = DriverError;
+
+    fn try_from(source_path: PathBuf) -> Result<Self, Self::Error> {
+        source_path.as_path().try_into()
+    }
+}
+
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
 pub struct BaseLock<D: Driver> {
