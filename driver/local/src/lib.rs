@@ -39,7 +39,7 @@ impl Driver for LocalDriver {
     /// Возвращает текущее время сервера.
     ///
     /// @return Возвращает текущее время в формате Unix timestamp.
-    fn server_time(&self) -> Result<Duration, DriverError> {
+    fn time(&self) -> Result<Duration, DriverError> {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| DriverError::ServerTimeError(e.to_string()))
@@ -285,7 +285,7 @@ mod tests {
     #[traced_test]
     fn test_time() {
         let driver = LocalDriver::connect(DriverParams::default()).unwrap();
-        let server_time = driver.server_time().unwrap();
+        let server_time = driver.time().unwrap();
         info!("Server time: {server_time:?}");
         let local_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -1,5 +1,6 @@
 use std::{
     fs, io,
+    path::Path,
     thread::{self, sleep},
     time::Duration,
 };
@@ -7,9 +8,10 @@ use std::{
 use tracing::{debug, error, info};
 use tracing_test::traced_test;
 
-use fs4me_client::{Fs, lock::lock_path::LockPath};
+use fs4me_client::Fs;
 use fs4me_interface::{Driver, Stat, WriteMode};
 use fs4me_local::LocalDriver;
+use fs4me_lock::base_lock::LockPaths;
 
 fn err_to_string<S: ToString>(err: S) -> String {
     err.to_string()
@@ -33,7 +35,9 @@ fn tests_rw() {
     );
 
     let test_data = b"Hello, Fs4me!";
-    let lock_file = LockPath::try_form(&fs, &file_path).unwrap().path;
+    let lock_file = <&Path as TryInto<LockPaths>>::try_into(&file_path)
+        .unwrap()
+        .path;
 
     // Запись данных в файл
     {
@@ -110,20 +114,26 @@ fn test_write_modes() {
     // Режим Overwrite - замена содержимого файла
     {
         let file_path = root_path.join("overwrite.txt");
-        let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
-        file.write_all(b"First write").unwrap();
-        file.flush().unwrap();
+        {
+            let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
+            file.write_all(b"First write").unwrap();
+            file.flush().unwrap();
+        }
 
         // Перезапись
-        let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
-        file.write_all(b"Overwritten").unwrap();
-        file.flush().unwrap();
+        {
+            let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
+            file.write_all(b"Overwritten").unwrap();
+            file.flush().unwrap();
+        }
 
         // Чтение
-        let mut file = fs.read(&file_path, 0).unwrap();
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).unwrap();
-        assert_eq!(buffer, b"Overwritten");
+        {
+            let mut file = fs.read(&file_path, 0).unwrap();
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).unwrap();
+            assert_eq!(buffer, b"Overwritten");
+        }
     }
 
     // Режим Append - добавление содержимого в конец файла
@@ -131,20 +141,25 @@ fn test_write_modes() {
         let file_path = root_path.join("append.txt");
 
         // Сначала создаём файл
-        let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
-        file.write_all(b"Hello, ").unwrap();
-        file.flush().unwrap();
-
+        {
+            let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
+            file.write_all(b"Hello, ").unwrap();
+            file.flush().unwrap();
+        }
         // Добавляем в конец
-        let mut file = fs.write(&file_path, WriteMode::Append).unwrap();
-        file.write_all(b"World!").unwrap();
-        file.flush().unwrap();
+        {
+            let mut file = fs.write(&file_path, WriteMode::Append).unwrap();
+            file.write_all(b"World!").unwrap();
+            file.flush().unwrap();
+        }
 
         // Чтение
-        let mut file = fs.read(&file_path, 0).unwrap();
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).unwrap();
-        assert_eq!(buffer, b"Hello, World!");
+        {
+            let mut file = fs.read(&file_path, 0).unwrap();
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).unwrap();
+            assert_eq!(buffer, b"Hello, World!");
+        }
     }
 
     // Режим fail_if_exists - ошибка при попытке записи в существующий файл
@@ -152,9 +167,11 @@ fn test_write_modes() {
         let file_path = root_path.join("fail_if_exists.txt");
 
         // Создаём файл
-        let mut file = fs.write(&file_path, WriteMode::FailIfExists).unwrap();
-        file.write_all(b"Hello, ").unwrap();
-        file.flush().unwrap();
+        {
+            let mut file = fs.write(&file_path, WriteMode::FailIfExists).unwrap();
+            file.write_all(b"Hello, ").unwrap();
+            file.flush().unwrap();
+        }
 
         // Попытка записи в существующий файл с режимом fail_if_exists должна ошибиться
         let result = fs.write(&file_path, WriteMode::FailIfExists);
@@ -164,15 +181,19 @@ fn test_write_modes() {
         );
 
         // Запись в существующий файл с режимом Overwrite должна работать
-        let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
-        file.write_all(b"Overwritten!").unwrap();
-        file.flush().unwrap();
+        {
+            let mut file = fs.write(&file_path, WriteMode::Overwrite).unwrap();
+            file.write_all(b"Overwritten!").unwrap();
+            file.flush().unwrap();
+        }
 
         // Чтение
-        let mut file = fs.read(&file_path, 0).unwrap();
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).unwrap();
-        assert_eq!(buffer, b"Overwritten!");
+        {
+            let mut file = fs.read(&file_path, 0).unwrap();
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).unwrap();
+            assert_eq!(buffer, b"Overwritten!");
+        }
     }
 }
 
@@ -185,7 +206,9 @@ fn test_parallel_read() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = LockPath::try_form(&fs_client, &file_path).unwrap().path;
+    let lock_path = <&Path as TryInto<LockPaths>>::try_into(&file_path)
+        .unwrap()
+        .path;
     let file_content = "Тестовая запись";
 
     // Создание файла с тестовым текстом
@@ -264,7 +287,9 @@ fn test_write_queue() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = LockPath::try_form(&fs_client, &file_path).unwrap().path;
+    let lock_path = <&Path as TryInto<LockPaths>>::try_into(&file_path)
+        .unwrap()
+        .path;
     let count_threads = 5;
     // Создание нескольких потоков для записи одного файла
     let threads = (0..count_threads)

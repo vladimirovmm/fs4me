@@ -1,32 +1,40 @@
 use fs4me_interface::{Driver, DriverError, Stat, WriteMode};
+use fs4me_lock::{LockMode, MultiLock};
+use fs4me_uuid::FsUuid;
 use std::{
     fmt::Debug,
     io,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 use tracing::{debug, error, instrument};
 
 pub mod buffer;
-pub mod lock;
 pub(crate) mod trash;
-pub(crate) mod uuid;
 
 use crate::{
     buffer::{DriverBufferReed, DriverBufferWrite},
-    lock::{Lock, LockMode},
     trash::trash_unique_path,
-    uuid::FsUuid,
 };
 
 /// Обёртка для драйвера для безопасного доступа к файловой системе.
 /// Обёртка обеспечивает безопасный одновременный доступ к файлу через lock файл.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Fs<D: Driver> {
     /// Драйвер для доступа к файловой системе.
-    driver: Box<D>,
+    pub driver: Arc<D>,
     /// Индификатор подключения. Нужен для работы с lock файлами.
-    uuid: FsUuid,
+    pub uuid: FsUuid,
+}
+
+impl<D: Driver> Clone for Fs<D> {
+    fn clone(&self) -> Self {
+        Self {
+            driver: self.driver.clone(),
+            uuid: self.uuid.new_copy_id(),
+        }
+    }
 }
 
 /// Вернуть идентификатор клиента.
@@ -61,7 +69,7 @@ impl<D: Driver> Fs<D> {
     pub fn new(driver: D) -> Self {
         Self {
             // Драйвер для доступа к файловой системе.
-            driver: Box::new(driver),
+            driver: Arc::new(driver),
             // Уникальный идентификатор клиента + номер клона. При каждом клонировании номер клона будет инкрементироваться.
             uuid: FsUuid::default(),
         }
@@ -80,7 +88,7 @@ impl<D: Driver> Fs<D> {
     /// @return Возвращает `Ok` с текущим временем сервера в формате Unix timestamp, или `Err` в случае ошибки.
     #[instrument(level = "debug", skip(self))]
     pub fn time(&self) -> Result<Duration, DriverError> {
-        self.driver.server_time()
+        self.driver.time()
     }
 
     /// Проверяет существование файла или директории.
@@ -135,9 +143,10 @@ impl<D: Driver> Fs<D> {
         // Проверка на наличие родительской директории происходит в блокировке
         // Разблокируется автоматически по выходе из области видимости
         debug!(?from, "Блокируем");
-        let _from_lock = Lock::try_from(self, from, LockMode::Write)?;
+        let _from_lock =
+            MultiLock::try_from(self.uuid, self.driver.clone(), from, LockMode::Write)?;
         debug!(?to, "Блокируем");
-        let _to_lock = Lock::try_from(self, to, LockMode::Write)?;
+        let _to_lock = MultiLock::try_from(self.uuid, self.driver.clone(), to, LockMode::Write)?;
 
         // Перемещаем файл/директорию
         debug!("Перемещаем from->to");
@@ -198,7 +207,7 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для записи.
         // Проверка на наличие родительской директории происходит внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости.
-        let lock = Lock::try_from(self, path, LockMode::Write)?;
+        let lock = MultiLock::try_from(self.uuid, self.driver.clone(), path, LockMode::Write)?;
 
         self.driver
             .write(path, mode)
@@ -225,7 +234,7 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для чтения.
         // Проверка на наличие родительской директори происход внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости
-        let lock = Lock::try_from(self, path, LockMode::Read)?;
+        let lock = MultiLock::try_from(self.uuid, self.driver.clone(), path, LockMode::Read)?;
 
         self.driver
             .read(path, position)

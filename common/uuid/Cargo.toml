@@ -1,5 +1,5 @@
 [package]
-name = "fs4me-client"
+name = "fs4me-uuid"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,17 +8,8 @@ license.workspace = true
 
 [dependencies]
 fs4me-interface.workspace = true
-fs4me-lock.workspace = true
-fs4me-uuid.workspace = true
-
 rand.workspace = true
-tracing.workspace = true
 
-[dev-dependencies]
-fs4me-local.workspace = true
-
-tracing-test.workspace = true
-tempfile.workspace = true
 
 [lints]
 workspace = true
