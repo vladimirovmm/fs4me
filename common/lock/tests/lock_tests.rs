@@ -257,11 +257,9 @@ fn test_lock() {
 
 /// Тест на истечение времени блокировки, после которого следующий запрос на блокировку может быть выполнен
 #[test]
+#[traced_test]
+#[cfg_attr(not(feature = "test_env"), ignore)]
 fn test_lock_timeout() {
-    unsafe {
-        std::env::set_var("LOCK_TIMEOUT", "3");
-    }
-
     let Init {
         driver,
         uuid,
@@ -269,11 +267,21 @@ fn test_lock_timeout() {
         source_path,
     } = Default::default();
 
-    let base_lock = BaseLock::try_form(uuid, driver.clone(), source_path).unwrap();
-    let _lock_a = base_lock.try_lock().unwrap();
+    let base_lock_a = BaseLock::try_form(uuid, driver.clone(), source_path.clone()).unwrap();
+    info!(?base_lock_a.path, "Пишем значение файла до блокировки");
+    fs::write(&base_lock_a.path, "null").unwrap();
+
+    info!("Блокируем файл");
+    let _lock_a = base_lock_a.try_lock().unwrap();
+
+    info!(?base_lock_a.tmp_path, "Пишем значение файла после блокировки");
+    fs::write(&base_lock_a.tmp_path, "a").unwrap();
+
+    // Создаём новый lock что бы были разные tmp
+    let base_lock_b = BaseLock::try_form(uuid, driver, source_path).unwrap();
 
     assert!(
-        base_lock.try_lock().is_err(),
+        base_lock_b.try_lock().is_err(),
         "Файл должен быть заблокирован"
     );
 
@@ -281,5 +289,18 @@ fn test_lock_timeout() {
     sleep(Duration::from_secs(5));
 
     info!("Попробуем установить новую блокировку");
-    let _lock_b = base_lock.try_lock().unwrap();
+    let _lock_b = base_lock_b.try_lock().unwrap();
+    fs::write(&base_lock_b.tmp_path, "b").unwrap();
+    drop(_lock_b);
+    drop(_lock_a);
+
+    info!("Ждем снятие всех блокировок");
+    sleep(Duration::from_secs(1));
+
+    info!(
+        "Проверяем что значение в файле должно быть `b` так как `a` утратило владение из-за timeout."
+    );
+    let content = fs::read_to_string(&base_lock_b.path).unwrap();
+
+    assert_eq!(&content, "b");
 }
