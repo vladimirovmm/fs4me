@@ -1,57 +1,15 @@
 use std::{
-    fs,
-    path::{Path, PathBuf},
-    sync::Arc,
     thread::{self, sleep},
     time::Duration,
 };
 
-use fs4me_interface::Driver;
-use fs4me_local::LocalDriver;
-use fs4me_lock::{LockMode, MultiLock, base_lock::LockPaths};
-use fs4me_uuid::FsUuid;
-use tempfile::TempDir;
+use fs4me_lock::{LockMode, MultiLock};
 use tracing::info;
 use tracing_test::traced_test;
 
-fn read_lock(src: &Path) -> (String, usize) {
-    let lock_path = LockPaths::try_from(src).unwrap().path;
-    let lock_content = fs::read_to_string(&lock_path).unwrap();
-    let lock_count_in_file = lock_content.lines().count();
+use crate::init::{Init, read_lock};
 
-    (lock_content, lock_count_in_file)
-}
-
-struct Init {
-    driver: Arc<LocalDriver>,
-    uuid: FsUuid,
-    tmp: TempDir,
-    src: PathBuf,
-}
-
-impl Default for Init {
-    fn default() -> Self {
-        let driver = Arc::new(LocalDriver::connect("").unwrap());
-        let uuid = FsUuid::default();
-
-        let tmp = TempDir::with_prefix("test_lock_").unwrap();
-
-        let root_path = tmp.path().to_path_buf();
-        info!(?root_path);
-
-        let src = root_path.join("src");
-        info!(?src, "Директория для блокировки");
-
-        driver.mkdir(&src, false).unwrap();
-
-        Self {
-            driver,
-            uuid,
-            tmp,
-            src,
-        }
-    }
-}
+mod init;
 
 /// Тест на блокировку при параллельном чтении
 #[test]
@@ -70,7 +28,8 @@ fn test_lock() {
             info!(?num, "===== Start =====");
 
             let result =
-                MultiLock::try_from(uuid.clone(), driver.clone(), &src, LockMode::Read).unwrap();
+                MultiLock::try_from(uuid.new_copy_id(), driver.clone(), &src, LockMode::Read)
+                    .unwrap();
 
             info!(?num, "===== End =====");
             result
@@ -96,7 +55,9 @@ fn test_concurrent_read_blocks_write() {
     info!("Создаем читателей");
     let count = 2;
     let read_locks = (0..count)
-        .map(|_| MultiLock::try_from(uuid.clone(), driver.clone(), &src, LockMode::Read).unwrap())
+        .map(|_| {
+            MultiLock::try_from(uuid.new_copy_id(), driver.clone(), &src, LockMode::Read).unwrap()
+        })
         .collect::<Vec<_>>();
 
     let (lock_content, lock_count_in_file) = read_lock(&src);
@@ -107,7 +68,13 @@ fn test_concurrent_read_blocks_write() {
     let source_path = src.clone();
     let driver_write = driver.clone();
     let write_lock = thread::spawn(move || {
-        MultiLock::try_from(uuid, driver_write, source_path, LockMode::Write).unwrap()
+        MultiLock::try_from(
+            uuid.new_copy_id(),
+            driver_write,
+            source_path,
+            LockMode::Write,
+        )
+        .unwrap()
     });
 
     info!("Ждем пока запись встанет в очередь");
@@ -122,7 +89,7 @@ fn test_concurrent_read_blocks_write() {
     let source_path = src.clone();
     let driver_read = driver;
     let new_read_lock = thread::spawn(move || {
-        MultiLock::try_from(uuid, driver_read, source_path, LockMode::Read).unwrap()
+        MultiLock::try_from(uuid.new_copy_id(), driver_read, source_path, LockMode::Read).unwrap()
     });
 
     info!("Ждем секунду, чтобы убедиться, что не появились новые читатели");

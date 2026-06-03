@@ -1,4 +1,6 @@
-use fs4me_lock::base_lock::BaseLock;
+use std::path::Path;
+
+use fs4me_lock::base_lock::LockPaths;
 use rand::{RngExt, distr::Alphanumeric};
 use tempfile::TempDir;
 use tracing::debug;
@@ -108,9 +110,12 @@ fn test_mv() {
     debug!("Проверка на lock-файлы. Они должны быть удалены по завершению операции");
     for path in [&src, &dst] {
         debug!(?path, "ищем lock-файлы в директории");
-        let lock_file = BaseLock::try_form(fs.uuid, fs.driver.clone(), path).unwrap();
+
+        let lock_file = <&Path as TryInto<LockPaths>>::try_into(path.as_path())
+            .unwrap()
+            .path;
         assert!(
-            !fs.exists(&lock_file.path),
+            !fs.exists(&lock_file),
             "lock-файл не должен существовать {lock_file:?}"
         );
         let parent = path.parent().unwrap();

@@ -8,7 +8,7 @@ use rand::random;
 
 /// Уникальный идентификатор клиента.
 /// Необходим для ведения логов и реализации блокировок, чтобы связывать клиента с конкретными действиями.
-#[derive(PartialEq, Copy, Eq, Hash)]
+#[derive(PartialEq, Clone, Copy, Eq, Hash)]
 pub struct FsUuid {
     /// Идентификатор подключения клиента.
     pub connection_id: u64,
@@ -39,9 +39,8 @@ impl Display for FsUuid {
 
 /// Нестандартная реализация `Clone` для `FsUuid`.
 /// Нужно, чтобы при клонировании клиента Fs менялся идентификатор. Но чтобы было понятно, кто родитель
-#[allow(clippy::non_canonical_clone_impl)]
-impl Clone for FsUuid {
-    fn clone(&self) -> Self {
+impl FsUuid {
+    pub fn new_copy_id(&self) -> Self {
         Self {
             connection_id: self.connection_id, // Идентификатор подключения
             copy_id: random(),                 // Номер копии подключения
@@ -110,10 +109,10 @@ mod tests {
             connection_id: random::<u64>(),
             copy_id: random::<u32>(),
         };
-        let cloned_uuid = uuid;
-        assert!(uuid != cloned_uuid);
-        assert_eq!(uuid.connection_id, cloned_uuid.connection_id);
-        assert!(uuid.copy_id != cloned_uuid.copy_id);
+        let uuid_with_new_copy_id = uuid.new_copy_id();
+        assert!(uuid != uuid_with_new_copy_id);
+        assert_eq!(uuid.connection_id, uuid_with_new_copy_id.connection_id);
+        assert!(uuid.copy_id != uuid_with_new_copy_id.copy_id);
 
         let copy_uuid = uuid;
         assert_eq!(uuid, copy_uuid);

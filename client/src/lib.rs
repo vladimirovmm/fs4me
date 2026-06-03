@@ -20,12 +20,21 @@ use crate::{
 
 /// Обёртка для драйвера для безопасного доступа к файловой системе.
 /// Обёртка обеспечивает безопасный одновременный доступ к файлу через lock файл.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Fs<D: Driver> {
     /// Драйвер для доступа к файловой системе.
     pub driver: Arc<D>,
     /// Индификатор подключения. Нужен для работы с lock файлами.
     pub uuid: FsUuid,
+}
+
+impl<D: Driver> Clone for Fs<D> {
+    fn clone(&self) -> Self {
+        Self {
+            driver: self.driver.clone(),
+            uuid: self.uuid.new_copy_id(),
+        }
+    }
 }
 
 /// Вернуть идентификатор клиента.
