@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use fs4me_lock::base_lock::BaseLock;
 use tracing::{debug, error, info};
 use tracing_test::traced_test;
 

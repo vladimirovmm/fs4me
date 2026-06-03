@@ -11,6 +11,9 @@ use fs4me_uuid::FsUuid;
 use tempfile::TempDir;
 use tracing::info;
 
+mod base_lock_tests;
+mod multi_lock_tests;
+
 pub fn read_lock(src: &Path) -> (String, usize) {
     let lock_path = LockPaths::try_from(src).unwrap().path;
     let lock_content = fs::read_to_string(&lock_path).unwrap();
@@ -23,7 +26,7 @@ pub struct Init {
     pub driver: Arc<LocalDriver>,
     pub uuid: FsUuid,
     pub tmp: TempDir,
-    pub src: PathBuf,
+    pub source_path: PathBuf,
 }
 
 impl Default for Init {
@@ -45,7 +48,7 @@ impl Default for Init {
             driver,
             uuid,
             tmp,
-            src,
+            source_path: src,
         }
     }
 }

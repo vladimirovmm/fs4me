@@ -9,8 +9,6 @@ use tracing_test::traced_test;
 
 use crate::init::{Init, read_lock};
 
-mod init;
-
 /// Тест на блокировку при параллельном чтении
 #[test]
 #[traced_test]
@@ -19,7 +17,7 @@ fn test_lock() {
         driver,
         uuid,
         tmp: _tmp,
-        src,
+        source_path,
     } = Default::default();
 
     let count = 10;
@@ -27,16 +25,20 @@ fn test_lock() {
         .map(|num| {
             info!(?num, "===== Start =====");
 
-            let result =
-                MultiLock::try_from(uuid.new_copy_id(), driver.clone(), &src, LockMode::Read)
-                    .unwrap();
+            let result = MultiLock::try_from(
+                uuid.new_copy_id(),
+                driver.clone(),
+                &source_path,
+                LockMode::Read,
+            )
+            .unwrap();
 
             info!(?num, "===== End =====");
             result
         })
         .collect::<Vec<_>>();
 
-    let (lock_content, lock_count_in_file) = read_lock(&src);
+    let (lock_content, lock_count_in_file) = read_lock(&source_path);
     info!(?lock_count_in_file, "Содержимое файла: \n{lock_content}");
     assert_eq!(count, lock_count_in_file);
 }
@@ -49,53 +51,53 @@ fn test_concurrent_read_blocks_write() {
         driver,
         uuid,
         tmp: _tmp,
-        src,
+        source_path,
     } = Default::default();
 
     info!("Создаем читателей");
     let count = 2;
     let read_locks = (0..count)
         .map(|_| {
-            MultiLock::try_from(uuid.new_copy_id(), driver.clone(), &src, LockMode::Read).unwrap()
+            MultiLock::try_from(
+                uuid.new_copy_id(),
+                driver.clone(),
+                &source_path,
+                LockMode::Read,
+            )
+            .unwrap()
         })
         .collect::<Vec<_>>();
 
-    let (lock_content, lock_count_in_file) = read_lock(&src);
+    let (lock_content, lock_count_in_file) = read_lock(&source_path);
     info!(?lock_count_in_file, "Содержимое файла: \n{lock_content}");
     assert_eq!(count, lock_count_in_file);
 
     info!("Попытка перейти в режим записи");
-    let source_path = src.clone();
+    let path = source_path.clone();
     let driver_write = driver.clone();
     let write_lock = thread::spawn(move || {
-        MultiLock::try_from(
-            uuid.new_copy_id(),
-            driver_write,
-            source_path,
-            LockMode::Write,
-        )
-        .unwrap()
+        MultiLock::try_from(uuid.new_copy_id(), driver_write, path, LockMode::Write).unwrap()
     });
 
     info!("Ждем пока запись встанет в очередь");
     sleep(Duration::from_secs(1));
 
-    let (lock_content, lock_count_in_file) = read_lock(&src);
+    let (lock_content, lock_count_in_file) = read_lock(&source_path);
     info!(?lock_count_in_file, "Содержимое файла: \n{lock_content}");
     assert_eq!(3, lock_count_in_file);
     assert!(lock_content.contains(&LockMode::WriteQueue.to_string()));
 
     info!("Новый читатель не может встать, пока есть очередь на запись");
-    let source_path = src.clone();
+    let path = source_path.clone();
     let driver_read = driver;
     let new_read_lock = thread::spawn(move || {
-        MultiLock::try_from(uuid.new_copy_id(), driver_read, source_path, LockMode::Read).unwrap()
+        MultiLock::try_from(uuid.new_copy_id(), driver_read, path, LockMode::Read).unwrap()
     });
 
     info!("Ждем секунду, чтобы убедиться, что не появились новые читатели");
     sleep(Duration::from_secs(1));
 
-    let (lock_content, lock_count_in_file) = read_lock(&src);
+    let (lock_content, lock_count_in_file) = read_lock(&source_path);
     info!(?lock_count_in_file, "Содержимое файла: \n{lock_content}");
     assert_eq!(
         3, lock_count_in_file,
@@ -108,7 +110,7 @@ fn test_concurrent_read_blocks_write() {
     info!("Ждем блокировки на запись");
     let write_lock = write_lock.join().unwrap();
 
-    let (lock_content, lock_count_in_file) = read_lock(&src);
+    let (lock_content, lock_count_in_file) = read_lock(&source_path);
     info!(?lock_count_in_file, "Содержимое файла: \n{lock_content}");
     assert_eq!(1, lock_count_in_file, "должно быть 1 блокировка на запись");
     assert!(
@@ -125,7 +127,7 @@ fn test_concurrent_read_blocks_write() {
 
     info!("Ждем блокировку на чтение");
     let _new_read_lock = new_read_lock.join().unwrap();
-    let (lock_content, lock_count_in_file) = read_lock(&src);
+    let (lock_content, lock_count_in_file) = read_lock(&source_path);
     info!(?lock_count_in_file, "Содержимое файла: \n{lock_content}");
     assert_eq!(1, lock_count_in_file, "должно быть 1 блокировка на запись");
     assert!(
