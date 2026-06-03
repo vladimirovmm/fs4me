@@ -14,8 +14,10 @@ tracing.workspace = true
 rand.workspace = true
 
 [dev-dependencies]
-tracing-test.workspace = true
+fs4me-local.workspace = true
 
+tracing-test.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

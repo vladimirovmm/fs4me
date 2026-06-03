@@ -113,8 +113,10 @@ name = "fs4me-lock"
 version = "0.2.0"
 dependencies = [
  "fs4me-interface",
+ "fs4me-local",
  "fs4me-uuid",
  "rand",
+ "tempfile",
  "tracing",
  "tracing-test",
 ]

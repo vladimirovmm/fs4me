@@ -1,6 +1,4 @@
-use std::fs;
-
-use fs4me_lock::{LockMode, MultiLock, base_lock::BaseLock};
+use fs4me_lock::base_lock::BaseLock;
 use rand::{RngExt, distr::Alphanumeric};
 use tempfile::TempDir;
 use tracing::debug;
@@ -124,44 +122,4 @@ fn test_mv() {
             "Lock файл найден"
         );
     }
-}
-
-#[test]
-#[traced_test]
-fn test_lock() {
-    let fs_client: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
-    let root = TempDir::with_prefix("test_lock_").unwrap();
-
-    let root_path = root.path();
-    debug!(?root_path);
-
-    let src = root_path.join("src");
-    debug!(?src);
-
-    fs_client.mkdir(&src, false).unwrap();
-
-    let count = 2;
-    let fs_clones = (0..count).map(|_| fs_client.clone()).collect::<Vec<_>>();
-    let _locks = (0..count)
-        .map(|num| {
-            debug!(?num, "===== Start =====");
-
-            let result = MultiLock::try_from(
-                fs_clones[num].uuid,
-                fs_clones[num].driver.clone(),
-                &src,
-                LockMode::Read,
-            )
-            .unwrap();
-
-            debug!(?num, "===== End =====");
-            result
-        })
-        .collect::<Vec<_>>();
-
-    let lock_path = BaseLock::try_form(fs_client.uuid, fs_client.driver.clone(), &src)
-        .unwrap()
-        .path;
-    let lock_count_in_file = fs::read_to_string(&lock_path).unwrap().lines().count();
-    assert_eq!(count, lock_count_in_file);
 }
