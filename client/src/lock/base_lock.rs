@@ -12,6 +12,7 @@ use crate::{
     lock::{parent_dir, parent_dir_mast_exists},
 };
 
+/// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
 pub struct BaseLock<'a, D: Driver> {
     /// Клиент для работы с файловой системой.
@@ -77,7 +78,18 @@ impl<'a, D: Driver> BaseLock<'a, D> {
         parent_dir_mast_exists(self.fs, &self.path)
     }
 
-    /// Блокирует lock-файл, подготавливая его для последующей записи
+    /// Блокирует файл блокировки, подготавливая его к последующей записи.
+    ///
+    /// Механизм блокировки основан на атомарной операции `mv` (перемещение),
+    /// так как она гарантирует, что в любой момент времени заблокировать файл
+    /// смогут только один процесс, независимо от типа файловой системы.
+    ///
+    /// Альтернативный подход `WriteMode::FailIfExists` не предоставляет таких
+    /// гарантий для всех типов файловых систем и может приводить к race condition.
+    ///
+    /// @return Возвращается инстанс `Blocker`, который автоматически снимает блокировку
+    /// при завершении работы (например, при падении процесса или при выходе из
+    /// области видимости `Drop` реализации).
     #[instrument(level = "debug", skip(self))]
     pub fn try_lock(&'a self) -> Result<Blocker<'a, D>, DriverError> {
         self.parent_dir_mast_exists()?;
@@ -117,7 +129,7 @@ impl<'a, D: Driver> BaseLock<'a, D> {
         self.fs.exists(&self.path) || self.fs.exists(&self.block_path)
     }
 
-    /// Проверка на доступ к блокировке
+    /// Проверка на блокировку файла
     #[instrument(level = "debug", skip(self))]
     pub fn is_locked(&self) -> bool {
         // Если файл существует и он не старше 30 секунд, то блокировка установлена
@@ -131,7 +143,7 @@ impl<'a, D: Driver> BaseLock<'a, D> {
                 .unwrap_or(false)
     }
 
-    /// Удаление блокировки
+    /// Снятия блокировки
     #[instrument(level = "debug", skip(self))]
     pub fn unlock(&self) -> Result<(), DriverError> {
         debug!(?self.fs.uuid, "Разблокировка Lock-файла");
@@ -147,6 +159,7 @@ impl<'a, D: Driver> BaseLock<'a, D> {
         Ok(())
     }
 
+    /// @return Путь до файла блокировки
     pub fn path(&self) -> &Path {
         if self.fs.driver.exists(&self.block_path) {
             return &self.block_path;
