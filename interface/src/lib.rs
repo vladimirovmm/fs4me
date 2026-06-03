@@ -104,7 +104,7 @@ pub trait Driver: Sized + Clone {
     /// @param from - Исходный путь.
     /// @param to - Целевой путь.
     /// @return Result<()> - Результат: успех или ошибка
-    fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    fn rename<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
     where
         P: AsRef<Path> + Debug,
         Q: AsRef<Path> + Debug;

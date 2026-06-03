@@ -110,7 +110,7 @@ impl<'a, D: Driver> BaseLock<D> {
             return self.try_lock();
         }
         self.driver
-            .mv(&self.path, &self.block_path)
+            .rename(&self.path, &self.block_path)
             .inspect(|_| debug!(?self.uuid, "Успешная блокировка файла {:?}", self.path))
             .inspect_err(|err| debug!(?self.uuid, "Файл блокировки уже занят {err}"))
             .map(|_| Blocker {
@@ -150,12 +150,12 @@ impl<'a, D: Driver> BaseLock<D> {
     pub fn unlock(&self) -> Result<(), DriverError> {
         debug!(?self.uuid, "Разблокировка Lock-файла");
         if self.driver.exists(&self.tmp_path) {
-            self.driver.mv(&self.tmp_path, &self.path)?;
+            self.driver.rename(&self.tmp_path, &self.path)?;
             if self.driver.exists(&self.block_path) {
                 self.driver.rm(&self.block_path)?;
             }
         } else if self.driver.exists(&self.block_path) {
-            self.driver.mv(&self.block_path, &self.path)?;
+            self.driver.rename(&self.block_path, &self.path)?;
         }
 
         Ok(())

@@ -28,7 +28,7 @@ fn test_mv() {
         !driver.exists(&b),
         "Директория {b:?} не должна существовать"
     );
-    driver.mv(&a, &b).unwrap();
+    driver.rename(&a, &b).unwrap();
     assert!(
         !driver.exists(&a),
         "Директория {a:?} не должна существовать после переименования"
@@ -61,20 +61,20 @@ fn test_mv_nonexistent() {
 
     assert!(
         matches!(
-            driver.mv(&from, &to).err().unwrap(),
+            driver.rename(&from, &to).err().unwrap(),
             DriverError::PathExistsError(_),
         ),
         "Ошибка должна быть PathExistsError"
     );
 
     driver.mkdir(&from, false).unwrap();
-    driver.mv(&from, &to).unwrap();
+    driver.rename(&from, &to).unwrap();
     assert!(driver.exists(&to), "{to:?} должно существовать");
     assert!(!driver.exists(&from), "{from:?} не должно существовать");
 
     assert!(
         matches!(
-            driver.mv(&from, &to).err().unwrap(),
+            driver.rename(&from, &to).err().unwrap(),
             DriverError::PathExistsError(_),
         ),
         "Ошибка должна быть PathExistsError"
@@ -99,7 +99,7 @@ fn test_mv_with_files() {
     let b = root.join("b");
     driver.mkdir(&b, false).unwrap();
 
-    driver.mv(&a, &b).unwrap();
+    driver.rename(&a, &b).unwrap();
     let a1 = b.join("a1");
     assert!(driver.exists(&a1), "{a1:?} должна существовать");
 }

@@ -123,7 +123,7 @@ impl Driver for LocalDriver {
     /// @param to Целевой путь.
     /// @return Результат операции.
     #[instrument(level = "debug", skip(self))]
-    fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    fn rename<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
     where
         P: AsRef<Path> + Debug,
         Q: AsRef<Path> + Debug,
