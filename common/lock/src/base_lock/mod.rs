@@ -4,7 +4,7 @@ use std::{
     fmt::{Debug, Display},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::{debug, instrument, warn};
 

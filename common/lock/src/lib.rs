@@ -17,7 +17,6 @@ pub(crate) mod lock_info;
 
 use crate::{
     base_lock::BaseLock,
-    helpers::time_expired,
     lock_info::{LockInfo, LockInfoRead},
 };
 
