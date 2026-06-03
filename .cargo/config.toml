@@ -1,0 +1,2 @@
+[alias]
+test-env = "test --features test_env -p fs4me-lock test_lock_timeout"

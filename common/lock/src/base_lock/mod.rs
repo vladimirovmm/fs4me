@@ -4,7 +4,7 @@ use std::{
     fmt::{Debug, Display},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{debug, instrument, warn};
 
@@ -105,13 +105,18 @@ impl<'a, D: Driver> BaseLock<D> {
 
         if self.driver.exists(&self.block_path) {
             // Такое случается, если блокировка чужая продержалась более 30 секунд
-            return Ok(Blocker(self));
+            // обновляем время последнего изменения у файла, чтобы никто другой не захватил блокировку
+            self.unlock()?;
+            return self.try_lock();
         }
         self.driver
             .mv(&self.path, &self.block_path)
             .inspect(|_| debug!(?self.uuid, "Успешная блокировка файла {:?}", self.path))
             .inspect_err(|err| debug!(?self.uuid, "Файл блокировки уже занят {err}"))
-            .map(|_| Blocker(self))
+            .map(|_| Blocker {
+                lock: self,
+                start: Instant::now(),
+            })
     }
 
     /// Проверка на существование lock-файла
@@ -128,9 +133,14 @@ impl<'a, D: Driver> BaseLock<D> {
             && self
                 .driver
                 .stat(&self.block_path)
-                .map(|stat| {
-                    stat.modified() + Duration::from_secs(time_expired())
-                        >= self.driver.time().unwrap_or_default()
+                .map(|stat| stat.modified())
+                .map(|modified| {
+                    let time_exp = time_expired();
+                    let expired = modified + time_exp;
+                    let now = self.driver.time().unwrap_or_default();
+
+                    debug!(?modified, ?time_exp, ?expired, ?now);
+                    expired >= now
                 })
                 .unwrap_or(false)
     }
@@ -151,6 +161,13 @@ impl<'a, D: Driver> BaseLock<D> {
         Ok(())
     }
 
+    /// Удаляются блокировки без вношения изменений.
+    /// Используется, если блокировка просрочена.
+    pub(crate) fn drop_lock(&self) -> Result<(), DriverError> {
+        todo!();
+        Ok(())
+    }
+
     /// @return Путь до файла блокировки
     pub fn path(&self) -> &Path {
         if self.driver.exists(&self.block_path) {
@@ -160,12 +177,26 @@ impl<'a, D: Driver> BaseLock<D> {
     }
 }
 
-pub struct Blocker<'a, D: Driver>(pub(crate) &'a BaseLock<D>);
+/// Объект блокировки.
+/// Блокировка активна, пока этот объект существует.
+/// При удалении снимается блокировка.
+pub struct Blocker<'a, D: Driver> {
+    /// Объект для работы с блокировкой
+    lock: &'a BaseLock<D>,
+    /// Время начала блокировки нужно для того, чтобы в случае утери(timeout) не перезаписать чужую блокировку
+    start: Instant,
+}
 
 impl<'a, D: Driver> Drop for Blocker<'a, D> {
     fn drop(&mut self) {
-        if let Err(err) = self.0.unlock() {
-            let path = &self.0.path;
+        let result = if self.start.elapsed() > time_expired() {
+            self.lock.drop_lock()
+        } else {
+            self.lock.unlock()
+        };
+
+        if let Err(err) = result {
+            let path = &self.lock.path;
             warn!(?path, ?err, "Ошибка при разблокировки");
         }
     }

@@ -1,21 +1,19 @@
 use fs4me_interface::{Driver, DriverError};
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 
 /// Время ожидания (в секундах), после которого блокировка считается истекшей.
-pub(crate) fn time_expired() -> u64 {
-    #[cfg(test)]
+pub(crate) fn time_expired() -> Duration {
+    #[cfg(feature = "test_env")]
     {
-        // В режиме тестов берём значение из переменной окружения
-        std::env::var("LOCK_TIME_OUT")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(30)
+        Duration::from_secs(3)
     }
-    #[cfg(not(test))]
+    #[cfg(not(feature = "test_env"))]
     {
         // В обычном режиме возвращаем 30
-        30
+
+        use std::time::Duration;
+        Duration::from_secs(30)
     }
 }
 
