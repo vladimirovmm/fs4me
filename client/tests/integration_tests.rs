@@ -1,14 +1,12 @@
 use std::fs;
 
+use fs4me_lock::{LockMode, MultiLock, base_lock::BaseLock};
 use rand::{RngExt, distr::Alphanumeric};
 use tempfile::TempDir;
 use tracing::debug;
 use tracing_test::traced_test;
 
-use fs4me_client::{
-    Fs,
-    lock::{LockMode, MultiLock, base_lock::BaseLock},
-};
+use fs4me_client::Fs;
 use fs4me_interface::{Driver, Stat};
 use fs4me_local::LocalDriver;
 
@@ -112,7 +110,7 @@ fn test_mv() {
     debug!("Проверка на lock-файлы. Они должны быть удалены по завершению операции");
     for path in [&src, &dst] {
         debug!(?path, "ищем lock-файлы в директории");
-        let lock_file = BaseLock::try_form(&fs.uuid, fs.driver.clone(), path).unwrap();
+        let lock_file = BaseLock::try_form(fs.uuid, fs.driver.clone(), path).unwrap();
         assert!(
             !fs.exists(&lock_file.path),
             "lock-файл не должен существовать {lock_file:?}"
@@ -148,14 +146,20 @@ fn test_lock() {
         .map(|num| {
             debug!(?num, "===== Start =====");
 
-            let result = MultiLock::try_from(&fs_clones[num], &src, LockMode::Read).unwrap();
+            let result = MultiLock::try_from(
+                fs_clones[num].uuid,
+                fs_clones[num].driver.clone(),
+                &src,
+                LockMode::Read,
+            )
+            .unwrap();
 
             debug!(?num, "===== End =====");
             result
         })
         .collect::<Vec<_>>();
 
-    let lock_path = BaseLock::try_form(&fs_client.uuid, fs_client.driver.clone(), &src)
+    let lock_path = BaseLock::try_form(fs_client.uuid, fs_client.driver.clone(), &src)
         .unwrap()
         .path;
     let lock_count_in_file = fs::read_to_string(&lock_path).unwrap().lines().count();

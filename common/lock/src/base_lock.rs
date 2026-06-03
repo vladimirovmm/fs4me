@@ -1,4 +1,5 @@
 use fs4me_interface::{Driver, DriverError, WriteMode};
+use fs4me_uuid::FsUuid;
 use rand::{RngExt, distr::Alphanumeric};
 use std::{
     fmt::{Debug, Display},
@@ -8,35 +9,14 @@ use std::{
 };
 use tracing::{debug, instrument, warn};
 
-use crate::lock::parent_dir;
-
-/// Проверяет, существует ли родительская директория для указанного пути.
-///
-/// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
-#[instrument(level = "debug", skip(driver))]
-fn parent_dir_mast_exists<D, P>(driver: Arc<D>, path: P) -> Result<(), DriverError>
-where
-    D: Driver,
-    P: AsRef<Path> + Debug,
-{
-    let path = path.as_ref();
-    parent_dir(path).and_then(|path| {
-        if driver.exists(path) {
-            debug!("Родительская директория существует: {path:?}");
-            Ok(())
-        } else {
-            warn!("Родительская директория не существует: {path:?}");
-            Err(DriverError::ParentDirError(path.to_path_buf()))
-        }
-    })
-}
+use crate::{parent_dir, parent_dir_mast_exists};
 
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
 pub struct BaseLock<D: Driver> {
-    /// Уникальный идентификатор блокировки клиента (UUID).
+    /// Уникальный идентификатор клиента.
     /// Используется для отображения в логах.
-    uuid: String,
+    uuid: FsUuid,
     /// Драйвер для работы с файловой системой.
     driver: Arc<D>,
     /// Путь до файла блокировки
@@ -54,20 +34,17 @@ pub struct BaseLock<D: Driver> {
     pub tmp_path: PathBuf,
 }
 
-impl<'a, D: Driver> Display for BaseLock<D> {
+impl<D: Driver> Display for BaseLock<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.uuid, self.path)
     }
 }
 
 impl<'a, D: Driver> BaseLock<D> {
-    pub fn try_form<P, S>(uuid: S, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
+    pub fn try_form<P>(uuid: FsUuid, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
     where
         P: AsRef<Path> + Debug,
-        S: ToString,
     {
-        let uuid = uuid.to_string();
-
         let source_path = source_path.as_ref();
         parent_dir_mast_exists(driver.clone(), source_path)?;
 

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["driver/local", "client", "interface"]
+members = ["driver/local", "client", "interface", "common/lock", "common/uuid"]
 
 default-members = ["client","interface"]
 
@@ -16,6 +16,8 @@ license = "MIT"
 fs4me-client.path = "./client"
 fs4me-interface.path = "./interface"
 fs4me-local.path = "./driver/local"
+fs4me-lock.path = "./common/lock"
+fs4me-uuid.path = "./common/uuid"
 
 thiserror = "2.0.18"
 tempfile = "3.27.0"

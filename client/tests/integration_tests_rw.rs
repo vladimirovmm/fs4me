@@ -4,10 +4,11 @@ use std::{
     time::Duration,
 };
 
+use fs4me_lock::base_lock::BaseLock;
 use tracing::{debug, error, info};
 use tracing_test::traced_test;
 
-use fs4me_client::{Fs, lock::base_lock::BaseLock};
+use fs4me_client::Fs;
 use fs4me_interface::{Driver, Stat, WriteMode};
 use fs4me_local::LocalDriver;
 
@@ -33,7 +34,7 @@ fn tests_rw() {
     );
 
     let test_data = b"Hello, Fs4me!";
-    let lock_file = BaseLock::try_form(&fs.uuid, fs.driver.clone(), &file_path)
+    let lock_file = BaseLock::try_form(fs.uuid, fs.driver.clone(), &file_path)
         .unwrap()
         .path;
 
@@ -204,7 +205,7 @@ fn test_parallel_read() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = BaseLock::try_form(&fs_client.uuid, fs_client.driver.clone(), &file_path)
+    let lock_path = BaseLock::try_form(fs_client.uuid, fs_client.driver.clone(), &file_path)
         .unwrap()
         .path;
     let file_content = "Тестовая запись";
@@ -285,7 +286,7 @@ fn test_write_queue() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = BaseLock::try_form(&fs_client.uuid, fs_client.driver.clone(), &file_path)
+    let lock_path = BaseLock::try_form(fs_client.uuid, fs_client.driver.clone(), &file_path)
         .unwrap()
         .path;
     let count_threads = 5;

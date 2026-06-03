@@ -1,4 +1,5 @@
 use fs4me_interface::DriverError;
+use fs4me_uuid::FsUuid;
 use std::{
     collections::VecDeque,
     fmt::{Debug, Display},
@@ -8,7 +9,7 @@ use std::{
 };
 use tracing::debug;
 
-use crate::{lock::LockMode, uuid::FsUuid};
+use crate::LockMode;
 
 /// Структура, содержащая информацию о блокировке файла и её статусе.
 #[derive(Debug, Default)]
@@ -236,8 +237,9 @@ impl LockInfo {
 
 #[cfg(test)]
 mod tests {
-    use crate::{lock::LockInfo, uuid::FsUuid};
+    use crate::LockInfo;
 
+    use fs4me_uuid::FsUuid;
     use std::{str::FromStr, time::Duration};
     use tracing_test::traced_test;
 
