@@ -95,7 +95,7 @@ where
     }
 }
 
-pub struct Lock<'a, D: Driver> {
+pub struct MultiLock<'a, D: Driver> {
     /// Клиент для работы с файловой системой.
     fs: &'a Fs<D>,
     /// Файл или директория, к которую нужно заблокировать.
@@ -108,7 +108,7 @@ pub struct Lock<'a, D: Driver> {
     lock_path: LockPath<'a, D>,
 }
 
-impl<D: Driver> Display for Lock<'_, D> {
+impl<D: Driver> Display for MultiLock<'_, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -118,7 +118,7 @@ impl<D: Driver> Display for Lock<'_, D> {
     }
 }
 
-impl<'a, D: Driver> Lock<'a, D> {
+impl<'a, D: Driver> MultiLock<'a, D> {
     /// Блокирует файл или директорию для чтения или записи.
     ///
     /// @param fs - Клиент, к которой подключен драйвер.
@@ -318,7 +318,7 @@ impl<'a, D: Driver> Lock<'a, D> {
     }
 }
 
-impl<'a, D: Driver> Drop for Lock<'a, D> {
+impl<'a, D: Driver> Drop for MultiLock<'a, D> {
     fn drop(&mut self) {
         if let Err(e) = self.retry_unlock() {
             error!("Ошибка при снятии блокировки: {e}. {self}");

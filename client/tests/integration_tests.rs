@@ -7,7 +7,7 @@ use tracing_test::traced_test;
 
 use fs4me_client::{
     Fs,
-    lock::{Lock, LockMode, lock_path::LockPath},
+    lock::{LockMode, MultiLock, lock_path::LockPath},
 };
 use fs4me_interface::{Driver, Stat};
 use fs4me_local::LocalDriver;
@@ -148,7 +148,7 @@ fn test_lock() {
         .map(|num| {
             debug!(?num, "===== Start =====");
 
-            let result = Lock::try_from(&fs_clones[num], &src, LockMode::Read).unwrap();
+            let result = MultiLock::try_from(&fs_clones[num], &src, LockMode::Read).unwrap();
 
             debug!(?num, "===== End =====");
             result

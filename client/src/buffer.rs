@@ -2,13 +2,13 @@ use std::io::{self, Read, Write};
 
 use fs4me_interface::Driver;
 
-use crate::lock::Lock;
+use crate::lock::MultiLock;
 
 /// Обёртка для буфера записи, гарантирующая автоматическое снятие блокировки файла.
 /// При выходе из области видимости (например, при завершении `drop`) блокировка файла будет корректно разблокирована.
 /// Это позволяет не беспокоиться о ручном снятии блокировки файлом.
 pub struct DriverBufferWrite<'a, D: Driver> {
-    pub lock: Lock<'a, D>,
+    pub lock: MultiLock<'a, D>,
     pub write: Box<dyn Write>,
 }
 
@@ -25,7 +25,7 @@ impl<'a, D: Driver> Write for DriverBufferWrite<'a, D> {
 /// При выходе из области видимости (например, при завершении `drop`) блокировка файла будет корректно разблокирована.
 /// Это позволяет не беспокоиться о ручном снятии блокировки файлом.
 pub struct DriverBufferReed<'a, D: Driver> {
-    pub lock: Lock<'a, D>,
+    pub lock: MultiLock<'a, D>,
     pub read: Box<dyn Read>,
 }
 
