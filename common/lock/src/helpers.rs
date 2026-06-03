@@ -2,6 +2,23 @@ use fs4me_interface::{Driver, DriverError};
 use std::{fmt::Debug, path::Path, sync::Arc};
 use tracing::{debug, instrument, warn};
 
+/// Время ожидания (в секундах), после которого блокировка считается истекшей.
+pub(crate) fn time_expired() -> u64 {
+    #[cfg(test)]
+    {
+        // В режиме тестов берём значение из переменной окружения
+        std::env::var("LOCK_TIME_OUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30)
+    }
+    #[cfg(not(test))]
+    {
+        // В обычном режиме возвращаем 30
+        30
+    }
+}
+
 /// Возвращает родительскую директорию для указанного пути.
 ///
 /// @param path Путь к файлу/директории.

@@ -8,7 +8,7 @@ use std::{
 };
 use tracing::{debug, instrument, warn};
 
-use crate::helpers::parent_dir_mast_exists;
+use crate::helpers::{parent_dir_mast_exists, time_expired};
 
 pub mod paths;
 pub use crate::base_lock::paths::LockPaths;
@@ -129,7 +129,7 @@ impl<'a, D: Driver> BaseLock<D> {
                 .driver
                 .stat(&self.block_path)
                 .map(|stat| {
-                    stat.modified() + Duration::from_secs(30)
+                    stat.modified() + Duration::from_secs(time_expired())
                         >= self.driver.time().unwrap_or_default()
                 })
                 .unwrap_or(false)

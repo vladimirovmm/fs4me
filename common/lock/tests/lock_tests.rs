@@ -1,18 +1,64 @@
+use fs4me_interface::Driver;
+use fs4me_local::LocalDriver;
+use fs4me_lock::{
+    LockMode, MultiLock,
+    base_lock::{BaseLock, LockPaths},
+};
+use fs4me_uuid::FsUuid;
 use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
     thread::{self, sleep},
     time::Duration,
 };
-
-use fs4me_lock::{LockMode, MultiLock};
+use tempfile::TempDir;
 use tracing::info;
 use tracing_test::traced_test;
 
-use crate::init::{Init, read_lock};
+fn read_lock(src: &Path) -> (String, usize) {
+    let lock_path = LockPaths::try_from(src).unwrap().path;
+    let lock_content = fs::read_to_string(&lock_path).unwrap();
+    let lock_count_in_file = lock_content.lines().count();
+
+    (lock_content, lock_count_in_file)
+}
+
+struct Init {
+    pub driver: Arc<LocalDriver>,
+    pub uuid: FsUuid,
+    pub tmp: TempDir,
+    pub source_path: PathBuf,
+}
+
+impl Default for Init {
+    fn default() -> Self {
+        let driver = Arc::new(LocalDriver::connect("").unwrap());
+        let uuid = FsUuid::default();
+
+        let tmp = TempDir::with_prefix("test_lock_").unwrap();
+
+        let root_path = tmp.path().to_path_buf();
+        info!(?root_path);
+
+        let src = root_path.join("src");
+        info!(?src, "Директория для блокировки");
+
+        driver.mkdir(&src, false).unwrap();
+
+        Self {
+            driver,
+            uuid,
+            tmp,
+            source_path: src,
+        }
+    }
+}
 
 /// Тест на блокировку при параллельном чтении
 #[test]
 #[traced_test]
-fn test_lock() {
+fn test_multi_lock() {
     let Init {
         driver,
         uuid,
@@ -46,7 +92,7 @@ fn test_lock() {
 /// Тест на блокировку при наличии параллельных читателей и писателей
 #[test]
 #[traced_test]
-fn test_concurrent_read_blocks_write() {
+fn test_multi_lock_concurrent_read_blocks_write() {
     let Init {
         driver,
         uuid,
@@ -134,4 +180,106 @@ fn test_concurrent_read_blocks_write() {
         lock_content.contains(&LockMode::Read.to_string()),
         "Должна быть блокировка на чтение"
     );
+}
+
+/// Тест на блокировку при параллельном чтении
+#[test]
+#[traced_test]
+fn test_lock() {
+    let Init {
+        driver,
+        uuid,
+        tmp: _tmp,
+        source_path,
+    } = Default::default();
+
+    let base_lock = BaseLock::try_form(uuid, driver.clone(), source_path).unwrap();
+    let content = "test".to_string();
+    {
+        let _lock = base_lock.try_lock().unwrap();
+        info!("Тестирование параллельной блокировки");
+
+        assert!(base_lock.try_lock().is_err(), "Файл уже заблокирован");
+
+        info!("Проверка путей во время блокировки");
+        assert!(
+            !driver.exists(&base_lock.path),
+            "Файл должен быть перемещён в {:?}",
+            base_lock.block_path
+        );
+        assert!(!driver.exists(&base_lock.tmp_path));
+        assert!(
+            driver.exists(&base_lock.block_path),
+            "Файл должен быть перемещён в {:?}",
+            base_lock.block_path
+        );
+
+        let mut writer = driver
+            .write(
+                &base_lock.tmp_path,
+                fs4me_interface::WriteMode::FailIfExists,
+            )
+            .unwrap();
+        write!(&mut writer, "{content}").unwrap();
+        drop(writer);
+
+        assert!(driver.exists(&base_lock.tmp_path));
+    }
+
+    info!("Проверка путей после разблокировки");
+    assert!(
+        !driver.exists(&base_lock.block_path),
+        "Файл должен быть перемещён в {:?}",
+        base_lock.block_path
+    );
+    assert!(
+        driver.exists(&base_lock.path),
+        "Файл должен быть перемещён в {:?}",
+        base_lock.path
+    );
+
+    info!("Проверка перемещения tmp_path->path");
+    assert!(
+        !driver.exists(&base_lock.tmp_path),
+        "Файл должен быть перемещён в {:?}",
+        base_lock.tmp_path
+    );
+
+    let mut reader = driver.read(&base_lock.path, 0).unwrap();
+    let mut buf = String::new();
+    reader.read_to_string(&mut buf).unwrap();
+    drop(reader);
+    assert_eq!(content, buf);
+
+    info!("Повторная блокировка");
+    base_lock.try_lock().unwrap();
+}
+
+/// Тест на истечение времени блокировки, после которого следующий запрос на блокировку может быть выполнен
+#[test]
+fn test_lock_timeout() {
+    unsafe {
+        std::env::set_var("LOCK_TIMEOUT", "3");
+    }
+
+    let Init {
+        driver,
+        uuid,
+        tmp: _tmp,
+        source_path,
+    } = Default::default();
+
+    let base_lock = BaseLock::try_form(uuid, driver.clone(), source_path).unwrap();
+    let _lock_a = base_lock.try_lock().unwrap();
+
+    assert!(
+        base_lock.try_lock().is_err(),
+        "Файл должен быть заблокирован"
+    );
+
+    info!("Подождём, когда блокировка устареет");
+    sleep(Duration::from_secs(5));
+
+    info!("Попробуем установить новую блокировку");
+    let _lock_b = base_lock.try_lock().unwrap();
 }
