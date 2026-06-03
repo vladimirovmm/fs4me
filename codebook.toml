@@ -1,10 +1,10 @@
 words = [
+    "Dwarnings",
+    "clippy",
     "cstr",
     "dav",
     "fopen",
     "lossy",
     "mkdir",
-    "clippy",
-    "Dwarnings",
+    "активна",
 ]
-ignore_paths = ["client/tests/integration_tests.rs"]

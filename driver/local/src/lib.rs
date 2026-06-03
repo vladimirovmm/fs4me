@@ -2,7 +2,7 @@ use fs4me_interface::{Driver, DriverError, DriverParams, Stat, WriteMode};
 use std::{
     fmt::Debug,
     fs::{self, OpenOptions},
-    io::{self, BufWriter, Seek},
+    io::{self, BufWriter, ErrorKind, Seek},
     path::{Path, PathBuf},
     time::{Duration, UNIX_EPOCH},
 };
@@ -131,10 +131,16 @@ impl Driver for LocalDriver {
         let from = from.as_ref();
         let to = to.as_ref();
         debug!(?from, ?to, "from->to");
-        fs::rename(from, to).map_err(|err| DriverError::MvError {
-            old_path: from.to_path_buf(),
-            new_path: to.to_path_buf(),
-            reason: err.to_string(),
+        fs::rename(from, to).map_err(|err| {
+            let from = from.to_path_buf();
+            match err.kind() {
+                ErrorKind::NotFound => DriverError::PathExistsError(from),
+                _ => DriverError::MvError {
+                    from,
+                    to: to.to_path_buf(),
+                    reason: err.to_string(),
+                },
+            }
         })
     }
 

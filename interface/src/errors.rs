@@ -34,11 +34,11 @@ pub enum DriverError {
     LastModifiedError { path: PathBuf, reason: String },
 
     #[error(
-        "Не удалось переместить/переименовать файл/директорию. Путь:{old_path:?}->{new_path:?}. {reason:?}"
+        "Не удалось переместить/переименовать файл/директорию. Путь:{from:?}->{to:?}. {reason:?}"
     )]
     MvError {
-        old_path: PathBuf,
-        new_path: PathBuf,
+        from: PathBuf,
+        to: PathBuf,
         reason: String,
     },
 
