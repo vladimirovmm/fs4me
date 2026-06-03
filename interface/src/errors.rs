@@ -74,4 +74,11 @@ pub enum DriverError {
 
     #[error("Ошибка при конвертации строки в UUID. {reason:?}")]
     ParseUuidError { reason: String },
+
+    #[error("Ошибка при копировании. {from:?}->{to:?} {reason:?}")]
+    CopyError {
+        from: PathBuf,
+        to: PathBuf,
+        reason: String,
+    },
 }

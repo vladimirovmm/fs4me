@@ -143,4 +143,15 @@ pub trait Driver: Sized + Clone {
     fn read<P>(&self, path: &P, position: u64) -> Result<Box<dyn io::Read>, DriverError>
     where
         P: AsRef<Path> + Debug;
+
+    /// Копирует файл/директорию.
+    ///
+    /// @param from - Путь к исходному файлу.
+    /// @param to - Путь к целевому файлу.
+    ///
+    /// @return успех или ошибка.
+    fn copy<P, Q>(&self, from: &P, to: &Q) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+        Q: AsRef<Path> + Debug;
 }
