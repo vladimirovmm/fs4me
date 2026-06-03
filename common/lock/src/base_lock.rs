@@ -11,6 +11,51 @@ use tracing::{debug, instrument, warn};
 
 use crate::{parent_dir, parent_dir_mast_exists};
 
+/// Пути, используемые для реализации блокировки
+pub struct LockPaths {
+    /// Изначальный путь до файла блокировки.
+    pub path: PathBuf,
+    /// Путь до файла блокировки, в который переименовывается в момент успешной блокировки path->block_path.
+    pub block_path: PathBuf,
+    /// Временный путь для нового содержимого файла блокировки.
+    /// После завершения записи содержимое этого файла атомарно перемещается на место основного файла блокировки. tmp_path->path
+    pub tmp_path: PathBuf,
+}
+
+impl TryFrom<&Path> for LockPaths {
+    type Error = DriverError;
+
+    fn try_from(source_path: &Path) -> Result<Self, Self::Error> {
+        let parent = parent_dir(source_path)?;
+        let source_file_name = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| DriverError::FileNameError(source_path.to_path_buf()))?;
+
+        let lock_file_name = if source_file_name.starts_with(".") {
+            format!("{}.lock", source_file_name)
+        } else {
+            format!(".{}.lock", source_file_name)
+        };
+
+        let path = parent.join(&lock_file_name);
+        let block_path = parent.join(format!("~{lock_file_name}"));
+
+        let mut rng = rand::rng();
+        let tmp_path = parent.join(format!(
+            "~{lock_file_name}.{}",
+            (0..9)
+                .map(|_| rng.sample(Alphanumeric) as char)
+                .collect::<String>()
+        ));
+        Ok(Self {
+            path,
+            block_path,
+            tmp_path,
+        })
+    }
+}
+
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
 pub struct BaseLock<D: Driver> {
@@ -45,38 +90,19 @@ impl<'a, D: Driver> BaseLock<D> {
     where
         P: AsRef<Path> + Debug,
     {
-        let source_path = source_path.as_ref();
-        parent_dir_mast_exists(driver.clone(), source_path)?;
-
-        let parent = parent_dir(source_path)?;
-        let source_file_name = source_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| DriverError::FileNameError(source_path.to_path_buf()))?;
-
-        let lock_file_name = if source_file_name.starts_with(".") {
-            format!("{}.lock", source_file_name)
-        } else {
-            format!(".{}.lock", source_file_name)
-        };
-
-        let lock_path = parent.join(&lock_file_name);
-        let block_lock_path = parent.join(format!("~{lock_file_name}"));
-
-        let mut rng = rand::rng();
-        let tmp_lock_path = parent.join(format!(
-            "~{lock_file_name}.{}",
-            (0..9)
-                .map(|_| rng.sample(Alphanumeric) as char)
-                .collect::<String>()
-        ));
+        let LockPaths {
+            path,
+            block_path,
+            tmp_path,
+        } = source_path.as_ref().try_into()?;
+        parent_dir_mast_exists(driver.clone(), &path)?;
 
         Ok(Self {
             uuid,
             driver,
-            block_path: block_lock_path,
-            path: lock_path,
-            tmp_path: tmp_lock_path,
+            block_path,
+            path,
+            tmp_path,
         })
     }
 
