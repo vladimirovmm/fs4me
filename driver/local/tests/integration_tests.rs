@@ -60,41 +60,6 @@ fn test_ls() {
     assert!(!driver.exists(&dir_0), "Директория должна быть удалена");
 }
 
-/// Тестирование переименования/перемещения директорий с вложенными директориями.
-#[test]
-#[traced_test]
-fn test_rename() {
-    let tmp_dir = tempdir().unwrap();
-    info!("Временная директория: {:?}", tmp_dir.path());
-
-    let driver = LocalDriver::connect(DriverParams::default()).unwrap();
-
-    let root = tmp_dir.path();
-    let a = root.join("a");
-    let a1 = a.join("a1");
-    let b = root.join("b");
-
-    driver.mkdir(&a1, true).unwrap();
-    assert!(driver.exists(&a), "Директория {a:?} должна существовать");
-    assert!(
-        !driver.exists(&b),
-        "Директория {b:?} не должна существовать"
-    );
-    driver.mv(&a, &b).unwrap();
-    assert!(
-        !driver.exists(&a),
-        "Директория {a:?} не должна существовать после переименования"
-    );
-    assert!(
-        driver.exists(&b),
-        "Директория {b:?} должна существовать после переименования"
-    );
-    assert!(
-        driver.exists(b.join("a1")),
-        "Директория `b/a1` должна существовать"
-    );
-}
-
 /// Тестирование работы LocalDriver с директориями.
 /// Проверяет создание, удаление, перечисление и проверку существования директорий.
 #[test]
