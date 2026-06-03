@@ -7,7 +7,7 @@ use std::{
 use tracing::{debug, error, info};
 use tracing_test::traced_test;
 
-use fs4me_client::{Fs, lock::lock_path::LockPath};
+use fs4me_client::{Fs, lock::base_lock::BaseLock};
 use fs4me_interface::{Driver, Stat, WriteMode};
 use fs4me_local::LocalDriver;
 
@@ -33,7 +33,7 @@ fn tests_rw() {
     );
 
     let test_data = b"Hello, Fs4me!";
-    let lock_file = LockPath::try_form(&fs, &file_path).unwrap().path;
+    let lock_file = BaseLock::try_form(&fs, &file_path).unwrap().path;
 
     // Запись данных в файл
     {
@@ -185,7 +185,7 @@ fn test_parallel_read() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = LockPath::try_form(&fs_client, &file_path).unwrap().path;
+    let lock_path = BaseLock::try_form(&fs_client, &file_path).unwrap().path;
     let file_content = "Тестовая запись";
 
     // Создание файла с тестовым текстом
@@ -264,7 +264,7 @@ fn test_write_queue() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = LockPath::try_form(&fs_client, &file_path).unwrap().path;
+    let lock_path = BaseLock::try_form(&fs_client, &file_path).unwrap().path;
     let count_threads = 5;
     // Создание нескольких потоков для записи одного файла
     let threads = (0..count_threads)

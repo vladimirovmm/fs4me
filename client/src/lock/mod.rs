@@ -9,11 +9,11 @@ use std::{
 };
 use tracing::{debug, error, instrument, warn};
 
+pub mod base_lock;
 pub(crate) mod lock_info;
-pub mod lock_path;
 
 use crate::lock::lock_info::{LockInfo, LockInfoRead};
-use crate::{Fs, lock::lock_path::LockPath};
+use crate::{Fs, lock::base_lock::BaseLock};
 
 /// Возвращает родительскую директорию для указанного пути.
 ///
@@ -105,7 +105,7 @@ pub struct MultiLock<'a, D: Driver> {
     /// Время последнего изменения блокировки.
     modified_time: Option<Duration>,
     /// Для работы с путями файла блокировки
-    lock_path: LockPath<'a, D>,
+    lock_path: BaseLock<'a, D>,
 }
 
 impl<D: Driver> Display for MultiLock<'_, D> {
@@ -132,7 +132,7 @@ impl<'a, D: Driver> MultiLock<'a, D> {
     {
         let source_path = path.as_ref().to_path_buf();
         let mut lock = Self {
-            lock_path: LockPath::try_form(fs, &source_path)?,
+            lock_path: BaseLock::try_form(fs, &source_path)?,
             fs,
             source_path,
             hash: None,

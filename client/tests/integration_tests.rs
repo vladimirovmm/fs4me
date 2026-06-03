@@ -7,7 +7,7 @@ use tracing_test::traced_test;
 
 use fs4me_client::{
     Fs,
-    lock::{LockMode, MultiLock, lock_path::LockPath},
+    lock::{LockMode, MultiLock, base_lock::BaseLock},
 };
 use fs4me_interface::{Driver, Stat};
 use fs4me_local::LocalDriver;
@@ -112,7 +112,7 @@ fn test_mv() {
     debug!("Проверка на lock-файлы. Они должны быть удалены по завершению операции");
     for path in [&src, &dst] {
         debug!(?path, "ищем lock-файлы в директории");
-        let lock_file = LockPath::try_form(&fs, path).unwrap();
+        let lock_file = BaseLock::try_form(&fs, path).unwrap();
         assert!(
             !fs.exists(&lock_file.path),
             "lock-файл не должен существовать {lock_file:?}"
@@ -155,7 +155,7 @@ fn test_lock() {
         })
         .collect::<Vec<_>>();
 
-    let lock_path = LockPath::try_form(&fs_client, &src).unwrap().path;
+    let lock_path = BaseLock::try_form(&fs_client, &src).unwrap().path;
     let lock_count_in_file = fs::read_to_string(&lock_path).unwrap().lines().count();
     assert_eq!(count, lock_count_in_file);
 }

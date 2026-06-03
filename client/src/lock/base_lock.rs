@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct LockPath<'a, D: Driver> {
+pub struct BaseLock<'a, D: Driver> {
     /// Клиент для работы с файловой системой.
     fs: &'a Fs<D>,
     /// Путь до файла блокировки
@@ -31,7 +31,7 @@ pub struct LockPath<'a, D: Driver> {
     pub tmp_path: PathBuf,
 }
 
-impl<'a, D: Driver> LockPath<'a, D> {
+impl<'a, D: Driver> BaseLock<'a, D> {
     pub fn try_form<P>(fs: &'a Fs<D>, source_path: P) -> Result<Self, DriverError>
     where
         P: AsRef<Path> + Debug,
@@ -155,7 +155,7 @@ impl<'a, D: Driver> LockPath<'a, D> {
     }
 }
 
-pub struct Blocker<'a, D: Driver>(pub(crate) &'a LockPath<'a, D>);
+pub struct Blocker<'a, D: Driver>(pub(crate) &'a BaseLock<'a, D>);
 
 impl<'a, D: Driver> Drop for Blocker<'a, D> {
     fn drop(&mut self) {
