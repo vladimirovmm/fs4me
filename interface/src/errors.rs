@@ -10,6 +10,9 @@ pub enum DriverError {
     #[error("Путь {0} существует")]
     PathExistsError(PathBuf),
 
+    #[error("Путь {0} не существует")]
+    PathNotExistsError(PathBuf),
+
     #[error("{0} Не является директорией")]
     NotADirectoryError(PathBuf),
 
@@ -81,4 +84,7 @@ pub enum DriverError {
         to: PathBuf,
         reason: String,
     },
+
+    #[error("Путь должен быть файлом. Путь: {0:?}")]
+    PathNotFileError(PathBuf),
 }

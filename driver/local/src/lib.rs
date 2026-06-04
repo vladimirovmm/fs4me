@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, UNIX_EPOCH},
 };
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 const DRIVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DRIVER_NAME: &str = env!("CARGO_PKG_NAME");
@@ -76,13 +76,19 @@ impl Driver for LocalDriver {
             })?
             .duration_since(UNIX_EPOCH)
             .map_err(|err| DriverError::ServerTimeError(err.to_string()))?;
+
         if metadata.is_file() {
             Ok(Stat::File {
                 size: metadata.len(),
                 modified,
             })
-        } else {
+        } else if metadata.is_dir() {
             Ok(Stat::Dir { modified })
+        } else {
+            Err(DriverError::StatError {
+                path: path.to_path_buf(),
+                reason: "Неподдерживаемый тип файла".to_string(),
+            })
         }
     }
 
@@ -114,7 +120,8 @@ impl Driver for LocalDriver {
                 reason: err.to_string(),
             })?
             .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path()))
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir() || path.is_file()))
     }
 
     /// Перемещает/переименовывает файл/директорию.
@@ -264,33 +271,51 @@ impl Driver for LocalDriver {
         Ok(Box::new(BufWriter::new(file)))
     }
 
-    fn copy<P, Q>(&self, from: &P, to_dir: &Q) -> Result<(), DriverError>
+    /// Копирует файл из `from` в `to`.
+    ///
+    /// @return Возвращает ошибку, если файл не существует или не является файлом.
+    fn copy_file<P, Q>(&self, from: &P, to: &Q) -> Result<(), DriverError>
     where
         P: AsRef<Path> + Debug,
         Q: AsRef<Path> + Debug,
     {
-        let from = from.as_ref();
-        let to = to_dir.as_ref();
+        let from = from.as_ref().to_path_buf();
+        let from = from
+            .canonicalize()
+            .inspect_err(|err| warn!(?from, ?err, "Ошибка при получения полного пути"))
+            .map_err(|_| DriverError::PathExistsError(from))?;
 
-        if !to.exists() {
-            return Err(DriverError::NotADirectoryError(to.to_path_buf()));
+        if !from.is_file() {
+            debug!(?from, "Должен быть файлом");
+            return Err(DriverError::PathNotFileError(from));
         }
 
-        if from.is_file() {
-            let file_name = from
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(ToString::to_string)
-                .ok_or_else(|| DriverError::FileNameError(from.to_path_buf()))?;
-            let to = to.join(file_name);
-            fs::copy(from, &to).map_err(|err| DriverError::CopyError {
-                from: from.to_path_buf(),
-                to,
-                reason: err.to_string(),
-            })?;
+        let mut to = to.as_ref().to_path_buf();
+
+        debug!(?from, ?to, "копируем файл from->to=");
+
+        if to.exists() {
+            to = to
+                .canonicalize()
+                .inspect_err(|err| warn!(?to, ?err, "Ошибка при получения полного пути"))
+                .map_err(|_| DriverError::PathExistsError(to))?;
+
+            if !to.is_file() {
+                debug!(?to, "Если существует то он должен быть файлом");
+                return Err(DriverError::PathNotFileError(to));
+            }
+        }
+
+        if from == to {
             return Ok(());
         }
-        // fs::copy(from, to)
-        todo!()
+
+        fs::copy(&from, &to)
+            .map_err(|err| DriverError::CopyError {
+                from,
+                to,
+                reason: err.to_string(),
+            })
+            .map(|_| ())
     }
 }
