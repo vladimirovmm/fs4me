@@ -37,7 +37,7 @@ fn tests_rw() {
     let test_data = b"Hello, Fs4me!";
     let lock_file = <&Path as TryInto<LockPaths>>::try_into(&file_path)
         .unwrap()
-        .path;
+        .multi;
 
     // Запись данных в файл
     {
@@ -208,7 +208,7 @@ fn test_parallel_read() {
     let file_path = root_path.join("test.txt");
     let lock_path = <&Path as TryInto<LockPaths>>::try_into(&file_path)
         .unwrap()
-        .path;
+        .multi;
     let file_content = "Тестовая запись";
 
     // Создание файла с тестовым текстом
@@ -289,7 +289,7 @@ fn test_write_queue() {
     let file_path = root_path.join("test.txt");
     let lock_path = <&Path as TryInto<LockPaths>>::try_into(&file_path)
         .unwrap()
-        .path;
+        .multi;
     let count_threads = 5;
     // Создание нескольких потоков для записи одного файла
     let threads = (0..count_threads)

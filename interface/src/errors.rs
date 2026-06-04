@@ -2,13 +2,16 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum DriverError {
     #[error("Ошибка при получения полного пути {path:?}. {reason:?}")]
     PathResolutionError { path: PathBuf, reason: String },
 
     #[error("Путь {0} существует")]
     PathExistsError(PathBuf),
+
+    #[error("Путь {0} не существует")]
+    PathNotExistsError(PathBuf),
 
     #[error("{0} Не является директорией")]
     NotADirectoryError(PathBuf),
@@ -34,11 +37,11 @@ pub enum DriverError {
     LastModifiedError { path: PathBuf, reason: String },
 
     #[error(
-        "Не удалось переместить/переименовать файл/директорию. Путь:{old_path:?}->{new_path:?}. {reason:?}"
+        "Не удалось переместить/переименовать файл/директорию. Путь:{from:?}->{to:?}. {reason:?}"
     )]
     MvError {
-        old_path: PathBuf,
-        new_path: PathBuf,
+        from: PathBuf,
+        to: PathBuf,
         reason: String,
     },
 
@@ -74,4 +77,17 @@ pub enum DriverError {
 
     #[error("Ошибка при конвертации строки в UUID. {reason:?}")]
     ParseUuidError { reason: String },
+
+    #[error("Ошибка при копировании. {from:?}->{to:?} {reason:?}")]
+    CopyError {
+        from: PathBuf,
+        to: PathBuf,
+        reason: String,
+    },
+
+    #[error("Путь должен быть файлом. Путь: {0:?}")]
+    PathNotFileError(PathBuf),
+
+    #[error("Ошибка при обновлении времени последнего изменения файла. Путь: {path:?}. {reason:?}")]
+    UpdateFileModifiedTimeError { path: PathBuf, reason: String },
 }

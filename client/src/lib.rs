@@ -150,7 +150,7 @@ impl<D: Driver> Fs<D> {
 
         // Перемещаем файл/директорию
         debug!("Перемещаем from->to");
-        self.driver.mv(from, to)?;
+        self.driver.rename(from, to)?;
 
         Ok(())
     }
