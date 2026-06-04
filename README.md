@@ -29,11 +29,17 @@ fs4me/
 ├── common/            # Общие библиотеки
 │   ├── lock/          # Механизм lock-файлов
 │   │   ├── Cargo.toml
-│   │   ├── Readme.md
 │   │   └── src/
-│   │       ├── base_lock.rs # Базовый интерфейс для lock-модуля
+│   │       ├── base_lock/
+│   │       │   ├── mod.rs   # Базовый интерфейс для lock-модуля
+│   │       │   └── paths.rs # Работа с путями lock-файлов
 │   │       ├── lock_info.rs # Информация о блокировках
-│   │       └── lib.rs      # Основная реализация
+│   │       ├── helpers.rs   # Вспомогательные функции
+│   │       └── lib.rs       # Экспорт публичных API
+│   └── uuid/          # UUID для идентификации клиентов
+│       ├── Cargo.toml
+│       └── src/
+│           └── lib.rs
 │   └── uuid/          # UUID для идентификации клиентов
 │       ├── Cargo.toml
 │       └── src/
@@ -46,9 +52,9 @@ fs4me/
 └── interface/         # Базовый интерфейс для драйверов
     ├── Cargo.toml
     └── src/
-        ├── lib.rs
-        ├── errors.rs
-        └── open_params.rs
+        ├── lib.rs          # Основной трейт Driver
+        ├── errors.rs       # Определение ошибок
+        └── open_params.rs  # Параметры открытия файлов
 ```
 
 ---
