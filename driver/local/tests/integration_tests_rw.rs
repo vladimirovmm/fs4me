@@ -100,7 +100,7 @@ fn test_read_write_during_move() {
     write!(&mut fopen, "1").unwrap();
     fopen.flush().unwrap();
 
-    let file_b = root.join("a.txt");
+    let file_b = root.join("b.txt");
     driver.rename(&file_a, &file_b).unwrap();
     write!(&mut fopen, "2").unwrap();
 
@@ -113,5 +113,5 @@ fn test_read_write_during_move() {
 
     let content = fs::read_to_string(&file_b).unwrap();
     info!(?content, "Содержимое файла");
-    assert_eq!(content, "ab");
+    assert_eq!(content, "12");
 }
