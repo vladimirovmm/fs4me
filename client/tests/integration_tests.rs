@@ -113,7 +113,7 @@ fn test_mv() {
 
         let lock_file = <&Path as TryInto<LockPaths>>::try_into(path.as_path())
             .unwrap()
-            .path;
+            .multi;
         assert!(
             !fs.exists(&lock_file),
             "lock-файл не должен существовать {lock_file:?}"

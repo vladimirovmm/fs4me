@@ -3,8 +3,12 @@ use fs4me_uuid::FsUuid;
 use std::{
     fmt::{Debug, Display},
     path::{Path, PathBuf},
-    sync::Arc,
-    time::Instant,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 use tracing::{debug, instrument, warn};
 
@@ -15,25 +19,18 @@ pub use crate::base_lock::paths::LockPaths;
 
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
-pub struct BaseLock<D: Driver> {
+pub struct BaseLock<D: Driver + 'static> {
     /// Уникальный идентификатор клиента.
     /// Используется для отображения в логах.
     uuid: FsUuid,
     /// Драйвер для работы с файловой системой.
     driver: Arc<D>,
+    /// Обработчик потока, который обновляет время блокировки.
+    handle: Option<JoinHandle<Result<(), DriverError>>>,
+    /// Флаг, указывающий на остановку потока обновления времени блокировки.
+    stop: Arc<AtomicBool>,
     /// Путь до файла блокировки
     pub path: PathBuf,
-    /// Путь до заблокированного lock файла
-    pub block_path: PathBuf,
-    /// Путь к временному файлу блокировки.
-    ///
-    /// В этот файл сначала записывается новое содержимое блокировки.
-    /// После завершения записи файл атомарно перемещается на постоянное место
-    /// основного файла блокировки.
-    ///
-    /// Такой подход снижает вероятность конфликтов и уменьшает задержки,
-    /// возникающие при одновременном доступе нескольких процессов к файлу блокировки.
-    pub tmp_path: PathBuf,
 }
 
 impl<D: Driver> Display for BaseLock<D> {
@@ -42,162 +39,141 @@ impl<D: Driver> Display for BaseLock<D> {
     }
 }
 
-impl<'a, D: Driver> BaseLock<D> {
-    pub fn try_form<P>(uuid: FsUuid, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
+impl<D: Driver> BaseLock<D> {
+    /// Пытаемся создать блокировку для указанного пути и заблокировать файл блокировки.
+    #[instrument(level = "debug", skip(driver))]
+    pub fn try_lock<P>(uuid: FsUuid, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
     where
         P: AsRef<Path> + Debug,
     {
-        let LockPaths {
-            path,
-            block_path,
-            tmp_path,
-        } = source_path.as_ref().try_into()?;
+        let LockPaths { base: path, .. } = source_path.as_ref().try_into()?;
         parent_dir_mast_exists(driver.clone(), &path)?;
+
+        debug!(?uuid, ?path, "Попытка создать файл блокировки");
+
+        let result = || -> Result<(), DriverError> {
+            let mut writer = driver.write(&path, WriteMode::FailIfExists)?;
+            write!(writer, "{}", uuid).map_err(|err| DriverError::WriteError {
+                path: path.clone(),
+                reason: err.to_string(),
+            })?;
+            writer.flush().map_err(|err| DriverError::WriteError {
+                path: path.clone(),
+                reason: err.to_string(),
+            })?;
+            Ok(())
+        }();
+        if let Err(err) = result {
+            debug!(
+                ?err,
+                "Ошибка при создании файла блокировки, повторная попытка"
+            );
+            // Проверяем, не заблокирован ли файл
+            if Self::is_locked(driver.clone(), &path) {
+                debug!("Файл заблокирован");
+                return Err(err);
+            }
+            debug!("Удаление файла блокировки, если он существует");
+            // Удаляем файл блокировки, если он существует
+            driver.rm(&path)?;
+            return Self::try_lock(uuid, driver, source_path);
+        }
+
+        debug!(
+            "Чтение содержимого файла блокировки что бы проверить пренадлежность текущему клиенту"
+        );
+        let mut reader = driver.read(&path, 0)?;
+        let mut content = String::new();
+        reader
+            .read_to_string(&mut content)
+            .map_err(|err| DriverError::ReadSeekError {
+                path: path.clone(),
+                reason: err.to_string(),
+            })?;
+
+        if content.trim() != uuid.to_string() {
+            debug!("Блокировка файла принадлежит другому клиенту");
+            return Err(DriverError::LockFileBLocked(path.clone()));
+        }
+
+        debug!("Инициализация потока обновления времени блокировки");
+        let stop = Arc::new(AtomicBool::new(false));
+        let interval = Duration::from_secs(15);
+
+        let driver_thread = driver.clone();
+        let stop_thread = stop.clone();
+        let lock_path = path.clone();
+        let handle = thread::spawn(move || {
+            let mut last = Instant::now();
+            loop {
+                let elapsed = last.elapsed();
+
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
+                }
+                if elapsed >= interval {
+                    last = Instant::now(); // сброс на текущее время
+                    driver_thread.update_file_modified_time_now(&lock_path)?;
+                }
+
+                // Вместо thread::sleep() — park_timeout()
+                let remaining = interval - elapsed;
+                thread::park_timeout(remaining);
+            }
+
+            Ok(())
+        });
 
         Ok(Self {
             uuid,
             driver,
-            block_path,
+            handle: Some(handle),
+            stop,
             path,
-            tmp_path,
         })
     }
 
-    /// Проверяет, существует ли родительская директория для файла блокировки.
-    ///
-    /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
-    pub fn parent_dir_mast_exists(&self) -> Result<(), DriverError> {
-        parent_dir_mast_exists(self.driver.clone(), &self.path)
-    }
-
-    /// Блокирует файл блокировки, подготавливая его к последующей записи.
-    ///
-    /// Механизм блокировки основан на атомарной операции `mv` (перемещение),
-    /// так как она гарантирует, что в любой момент времени заблокировать файл
-    /// смогут только один процесс, независимо от типа файловой системы.
-    ///
-    /// Альтернативный подход `WriteMode::FailIfExists` не предоставляет таких
-    /// гарантий для всех типов файловых систем и может приводить к race condition.
-    ///
-    /// @return Возвращается инстанс `Blocker`, который автоматически снимает блокировку
-    /// при завершении работы (например, при падении процесса или при выходе из
-    /// области видимости `Drop` реализации).
-    #[instrument(level = "debug", skip(self))]
-    pub fn try_lock(&'a self) -> Result<Blocker<'a, D>, DriverError> {
-        self.parent_dir_mast_exists()?;
-
-        if !self.driver.exists(&self.path) && !self.driver.exists(&self.block_path) {
-            debug!(?self.uuid, "Файл блокировки не существует, создаём его");
-            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExists)?;
-            write!(writer, "").map_err(|err| DriverError::WriteError {
-                path: self.path.clone(),
-                reason: err.to_string(),
-            })?;
-            writer.flush().map_err(|err| DriverError::WriteError {
-                path: self.path.clone(),
-                reason: err.to_string(),
-            })?;
-        }
-
-        if self.is_locked() {
-            return Err(DriverError::LockFileBLocked(self.block_path.clone()));
-        }
-
-        if self.driver.exists(&self.block_path) {
-            // Такое случается, если блокировка чужая продержалась более 30 секунд
-            // обновляем время последнего изменения у файла, чтобы никто другой не захватил блокировку
-            self.unlock()?;
-            return self.try_lock();
-        }
-        self.driver
-            .rename(&self.path, &self.block_path)
-            .inspect(|_| debug!(?self.uuid, "Успешная блокировка файла {:?}", self.path))
-            .inspect_err(|err| debug!(?self.uuid, "Файл блокировки уже занят {err}"))
-            .map(|_| Blocker {
-                lock: self,
-                start: Instant::now(),
-            })
-    }
-
-    /// Проверка на существование lock-файла
-    #[instrument(level = "debug", skip(self))]
-    pub fn exist(&self) -> bool {
-        self.driver.exists(&self.path) || self.driver.exists(&self.block_path)
-    }
-
     /// Проверка на блокировку файла
-    #[instrument(level = "debug", skip(self))]
-    pub fn is_locked(&self) -> bool {
+    #[instrument(level = "debug", skip(driver))]
+    pub fn is_locked<P>(driver: Arc<D>, path: P) -> bool
+    where
+        P: AsRef<Path> + Debug,
+    {
         // Если файл существует и он не старше 30 секунд, то блокировка установлена
-        self.driver.exists(&self.block_path)
-            && self
-                .driver
-                .stat(&self.block_path)
+        driver.exists(&path)
+            && driver
+                .stat(path)
                 .map(|stat| stat.modified())
                 .map(|modified| {
                     let time_exp = time_expired();
                     let expired = modified + time_exp;
-                    let now = self.driver.time().unwrap_or_default();
+                    let now = driver.time().unwrap_or_default();
 
                     debug!(?modified, ?time_exp, ?expired, ?now);
                     expired >= now
                 })
                 .unwrap_or(false)
     }
-
-    /// Снятия блокировки
-    #[instrument(level = "debug", skip(self))]
-    pub fn unlock(&self) -> Result<(), DriverError> {
-        debug!(?self.uuid, "Разблокировка Lock-файла");
-        if self.driver.exists(&self.tmp_path) {
-            self.driver.rename(&self.tmp_path, &self.path)?;
-            if self.driver.exists(&self.block_path) {
-                self.driver.rm(&self.block_path)?;
-            }
-        } else if self.driver.exists(&self.block_path) {
-            self.driver.rename(&self.block_path, &self.path)?;
-        }
-
-        Ok(())
-    }
-
-    /// Удаляются блокировки без вношения изменений.
-    /// Используется, если блокировка просрочена.
-    pub(crate) fn drop_lock(&self) -> Result<(), DriverError> {
-        todo!();
-        Ok(())
-    }
-
-    /// @return Путь до файла блокировки
-    pub fn path(&self) -> &Path {
-        if self.driver.exists(&self.block_path) {
-            return &self.block_path;
-        }
-        &self.path
-    }
 }
 
-/// Объект блокировки.
-/// Блокировка активна, пока этот объект существует.
-/// При удалении снимается блокировка.
-pub struct Blocker<'a, D: Driver> {
-    /// Объект для работы с блокировкой
-    lock: &'a BaseLock<D>,
-    /// Время начала блокировки нужно для того, чтобы в случае утери(timeout) не перезаписать чужую блокировку
-    start: Instant,
-}
-
-impl<'a, D: Driver> Drop for Blocker<'a, D> {
+impl<D: Driver> Drop for BaseLock<D> {
     fn drop(&mut self) {
-        let result = if self.start.elapsed() > time_expired() {
-            self.lock.drop_lock()
-        } else {
-            self.lock.unlock()
-        };
+        debug!("Остановка потока обновления времени блокировки");
+        self.stop.store(true, Ordering::SeqCst);
 
-        if let Err(err) = result {
-            let path = &self.lock.path;
-            warn!(?path, ?err, "Ошибка при разблокировки");
+        debug!("Снятие блокировки");
+        if let Err(err) = self.driver.rm(&self.path) {
+            warn!(?err, "Ошибка при удалении файла блокировки");
         }
+
+        debug!("Ожидание завершения потока блокировки");
+        if let Some(handle) = self.handle.take() {
+            handle.thread().unpark();
+            if let Err(err) = handle.join() {
+                warn!(?err, "Ошибка при завершении потока блокировки");
+            }
+        }
+
+        debug!("Блокировка снята");
     }
 }

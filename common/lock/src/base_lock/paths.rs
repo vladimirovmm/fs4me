@@ -7,9 +7,9 @@ use crate::helpers::parent_dir;
 /// Пути, используемые для реализации блокировки
 pub struct LockPaths {
     /// Изначальный путь до файла блокировки.
-    pub path: PathBuf,
+    pub multi: PathBuf,
     /// Путь до файла блокировки, в который переименовывается в момент успешной блокировки path->block_path.
-    pub block_path: PathBuf,
+    pub base: PathBuf,
     /// Временный путь для нового содержимого файла блокировки.
     /// После завершения записи содержимое этого файла атомарно перемещается на место основного файла блокировки. tmp_path->path
     pub tmp_path: PathBuf,
@@ -42,8 +42,8 @@ impl TryFrom<&Path> for LockPaths {
                 .collect::<String>()
         ));
         Ok(Self {
-            path,
-            block_path,
+            multi: path,
+            base: block_path,
             tmp_path,
         })
     }
