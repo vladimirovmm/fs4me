@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum DriverError {
     #[error("Ошибка при получения полного пути {path:?}. {reason:?}")]
     PathResolutionError { path: PathBuf, reason: String },
@@ -87,4 +87,7 @@ pub enum DriverError {
 
     #[error("Путь должен быть файлом. Путь: {0:?}")]
     PathNotFileError(PathBuf),
+
+    #[error("Ошибка при обновлении времени последнего изменения файла. Путь: {path:?}. {reason:?}")]
+    UpdateFileModifiedTimeError { path: PathBuf, reason: String },
 }

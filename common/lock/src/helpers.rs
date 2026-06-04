@@ -13,7 +13,7 @@ pub(crate) fn time_expired() -> Duration {
         // В обычном режиме возвращаем 30
 
         use std::time::Duration;
-        Duration::from_secs(30)
+        Duration::from_mins(5)
     }
 }
 

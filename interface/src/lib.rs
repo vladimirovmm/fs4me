@@ -43,7 +43,7 @@ impl Stat {
 }
 
 /// Обеспечивает небезопасный доступ к файловому хранилищу. Т.е. без использования блокировок и управления одновременным доступе.
-pub trait Driver: Sized + Clone {
+pub trait Driver: Sized + Clone + Send + Sync + 'static {
     /// Возвращает название драйвера.
     ///
     /// @return &str - название драйвера
@@ -198,4 +198,11 @@ pub trait Driver: Sized + Clone {
 
         Ok(())
     }
+
+    /// Обновляет время последнего изменения файла на текущее.
+    ///
+    /// @param path - Путь к файлу.
+    ///
+    /// @return успех или ошибка.
+    fn update_file_modified_time_now(&self, path: impl AsRef<Path>) -> Result<(), DriverError>;
 }

@@ -1,10 +1,10 @@
 use fs4me_interface::{Driver, DriverError, DriverParams, Stat, WriteMode};
 use std::{
     fmt::Debug,
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, BufWriter, ErrorKind, Seek},
     path::{Path, PathBuf},
-    time::{Duration, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tracing::{debug, instrument, warn};
 
@@ -317,5 +317,25 @@ impl Driver for LocalDriver {
                 reason: err.to_string(),
             })
             .map(|_| ())
+    }
+
+    /// Обновляет время последнего изменения файла на текущее.
+    ///
+    /// @param path - Путь к файлу.
+    ///
+    /// @return успех или ошибка.
+    fn update_file_modified_time_now(&self, path: impl AsRef<Path>) -> Result<(), DriverError> {
+        let path = path.as_ref();
+        let file = File::open(path).map_err(|err| DriverError::FopenError {
+            path: path.to_path_buf(),
+            reason: err.to_string(),
+        })?;
+        file.set_modified(SystemTime::now()).map_err(|err| {
+            DriverError::UpdateFileModifiedTimeError {
+                path: path.to_path_buf(),
+                reason: err.to_string(),
+            }
+        })?;
+        Ok(())
     }
 }
