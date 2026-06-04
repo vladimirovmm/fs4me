@@ -100,6 +100,6 @@ fn test_mv_with_files() {
     driver.mkdir(&b, false).unwrap();
 
     driver.rename(&a, &b).unwrap();
-    let a1 = b.join("a1");
-    assert!(driver.exists(&a1), "{a1:?} должна существовать");
+    let new_a1 = b.join("a1");
+    assert!(driver.exists(&new_a1), "{new_a1:?} должна существовать");
 }

@@ -117,6 +117,6 @@ fn test_work_with_directory() {
     assert_eq!(
         driver.ls(&root).unwrap().count(),
         3,
-        "В корне должно быть 4 директории: b, c, d, .trash"
+        "В корне должно быть 4 директории: b, c, d"
     );
 }
