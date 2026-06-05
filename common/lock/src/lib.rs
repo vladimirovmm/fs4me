@@ -99,7 +99,7 @@ impl<D: Driver> MultiLock<D> {
     /// @param mode - Режим блокировки.
     /// @returns `Ok(MultiLock)` в случае успеха, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(driver))]
-    pub fn try_from<P>(
+    pub fn try_lock<P>(
         uuid: FsUuid,
         driver: Arc<D>,
         path: P,
@@ -207,10 +207,10 @@ impl<D: Driver> MultiLock<D> {
     /// @param mode - Режим блокировки: `Read`, `Write` или `WriteQueue`.
     /// @returns `Ok(())` при успехе, `Err(DriverError)` если блокировка занята.
     #[instrument(level = "debug", skip(self))]
-    fn try_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
+    fn inner_try_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         if matches!(mode, LockMode::Write) {
             debug!("Перед блокировкой на запись нужно встать в очередь");
-            self.try_lock(LockMode::WriteQueue)?;
+            self.inner_try_lock(LockMode::WriteQueue)?;
         }
 
         // Создаём уникальный доступ к lock файлу
@@ -268,7 +268,7 @@ impl<D: Driver> MultiLock<D> {
     fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         retry(|| -> Result<(), DriverError> {
             // Максимальное время ожидания
-            self.try_lock(mode)
+            self.inner_try_lock(mode)
         })
     }
 
@@ -277,14 +277,14 @@ impl<D: Driver> MultiLock<D> {
     ///
     /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
-    fn retry_unlock(&mut self) -> Result<(), DriverError> {
+    fn inner_retry_unlock(&mut self) -> Result<(), DriverError> {
         retry(|| -> Result<(), DriverError> { self.try_unlock() })
     }
 }
 
 impl<D: Driver> Drop for MultiLock<D> {
     fn drop(&mut self) {
-        if let Err(e) = self.retry_unlock() {
+        if let Err(e) = self.inner_retry_unlock() {
             error!("Ошибка при снятии блокировки: {e}. {self}");
         }
     }
