@@ -1,18 +1,14 @@
 use fs4me_interface::DriverError;
-use rand::{RngExt, distr::Alphanumeric};
 use std::path::{Path, PathBuf};
 
 use crate::helpers::parent_dir;
 
 /// Пути, используемые для реализации блокировки
 pub struct LockPaths {
-    /// Изначальный путь до файла блокировки.
+    /// Для мультипоточной блокировки
     pub multi: PathBuf,
-    /// Путь до файла блокировки, в который переименовывается в момент успешной блокировки path->block_path.
+    /// Путь до файла блокировки
     pub base: PathBuf,
-    /// Временный путь для нового содержимого файла блокировки.
-    /// После завершения записи содержимое этого файла атомарно перемещается на место основного файла блокировки. tmp_path->path
-    pub tmp_path: PathBuf,
 }
 
 impl TryFrom<&Path> for LockPaths {
@@ -31,21 +27,10 @@ impl TryFrom<&Path> for LockPaths {
             format!(".{}.lock", source_file_name)
         };
 
-        let path = parent.join(&lock_file_name);
-        let block_path = parent.join(format!("~{lock_file_name}"));
+        let multi = parent.join(&lock_file_name);
+        let base = parent.join(format!("~{lock_file_name}"));
 
-        let mut rng = rand::rng();
-        let tmp_path = parent.join(format!(
-            "~{lock_file_name}.{}",
-            (0..9)
-                .map(|_| rng.sample(Alphanumeric) as char)
-                .collect::<String>()
-        ));
-        Ok(Self {
-            multi: path,
-            base: block_path,
-            tmp_path,
-        })
+        Ok(Self { multi, base })
     }
 }
 
@@ -56,6 +41,7 @@ impl TryFrom<&PathBuf> for LockPaths {
         source_path.as_path().try_into()
     }
 }
+
 impl TryFrom<PathBuf> for LockPaths {
     type Error = DriverError;
 
