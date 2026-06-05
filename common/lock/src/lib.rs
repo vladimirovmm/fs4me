@@ -293,7 +293,7 @@ impl<D: Driver> MultiLock<D> {
                 }
 
                 // Вместо thread::sleep() — park_timeout()
-                let remaining = interval_thread - elapsed;
+                let remaining = interval_thread.saturating_sub(elapsed);
                 thread::park_timeout(remaining);
             }
 

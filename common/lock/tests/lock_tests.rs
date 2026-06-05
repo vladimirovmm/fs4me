@@ -1,7 +1,7 @@
 use fs4me_interface::Driver;
 use fs4me_local::LocalDriver;
 use fs4me_lock::{
-    LockMode, MultiLock,
+    LockInfo, LockMode, MultiLock,
     base_lock::{
         BaseLock,
         paths::{base_lock_path, multi_lock_path},
@@ -11,6 +11,7 @@ use fs4me_uuid::FsUuid;
 use std::{
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
     thread::{self, sleep},
     time::{Duration, SystemTime},
@@ -185,6 +186,55 @@ fn test_multi_lock_concurrent_read_blocks_write() {
     );
 }
 
+// MultiLock - тестирование на обновление времени блокировки в фоне
+#[test]
+#[cfg_attr(not(feature = "test_env"), ignore)]
+#[traced_test]
+fn test_multi_lock_background_refresh() {
+    let Init {
+        driver,
+        uuid,
+        tmp: _tmp,
+        source_path,
+    } = Default::default();
+
+    let multi_path = multi_lock_path(&source_path).unwrap();
+    info!(?multi_path, "Файл блокировки");
+    let modified = || -> Duration {
+        let lock_content = fs::read_to_string(&multi_path).unwrap();
+        LockInfo::from_str(&lock_content)
+            .unwrap()
+            .read
+            .first()
+            .cloned()
+            .unwrap_or_default()
+            .1
+    };
+
+    {
+        let _lock = MultiLock::try_lock(uuid, driver, source_path, LockMode::Read).unwrap();
+
+        let mut last = modified();
+        for _ in 0..5 {
+            sleep(Duration::from_secs(1));
+            assert!(
+                multi_path.exists(),
+                "Блокировочный файл должен существовать"
+            );
+            let new_time = modified();
+            info!("1");
+            assert!(
+                last >= new_time.saturating_sub(Duration::from_secs(3)),
+                "Время блокировки должно обновляться в фоне"
+            );
+            info!("2");
+            last = new_time;
+        }
+    }
+
+    assert!(!multi_path.exists(), "Должна быть снята");
+}
+
 /// Тест на блокировку при параллельном чтении
 #[test]
 #[traced_test]
@@ -291,7 +341,7 @@ fn test_base_lock_background_refresh() {
             assert!(base_path.exists(), "Блокировочный файл должен существовать");
             let new_time = modified();
             assert!(
-                last >= new_time - Duration::from_secs(3),
+                last >= new_time.saturating_sub(Duration::from_secs(3)),
                 "Время блокировки должно обновляться в фоне"
             );
             last = new_time;
