@@ -8,14 +8,16 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::{debug, instrument, warn};
 
-use crate::helpers::{parent_dir_mast_exists, time_expired};
+use crate::{
+    base_lock::paths::base_lock_path,
+    helpers::{background_refresh_interval, parent_dir_mast_exists, time_expired},
+};
 
 pub mod paths;
-pub use crate::base_lock::paths::LockPaths;
 
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
@@ -25,10 +27,11 @@ pub struct BaseLock<D: Driver> {
     uuid: FsUuid,
     /// Драйвер для работы с файловой системой.
     driver: Arc<D>,
-    /// Потока который обновляет время блокировки.
+    /// Поток, который обновляет время блокировки.
     handle: Option<JoinHandle<Result<(), DriverError>>>,
-    /// Для остановки потока обновления времени блокировки.
-    stop: Arc<AtomicBool>,
+    /// Указывает, была ли создана блокировка.
+    /// От неё зависит, нужно ли удалять файл блокировки и останавливать поток обновления.
+    blocked: Arc<AtomicBool>,
     /// Путь до файла блокировки
     path: PathBuf,
 }
@@ -48,7 +51,7 @@ impl<D: Driver> BaseLock<D> {
 
         // Пытаемся создать файл блокировки
         let result = || -> Result<(), DriverError> {
-            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExists)?;
+            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExist)?;
             write!(writer, "{}", self.uuid).map_err(|err| DriverError::WriteError {
                 path: self.path.clone(),
                 reason: err.to_string(),
@@ -87,6 +90,9 @@ impl<D: Driver> BaseLock<D> {
             return Err(DriverError::LockFileBLocked(self.path.clone()));
         }
 
+        // Блокировка успешно установлена, теперь требуется очистка и остановка потока обновления.
+        self.blocked.store(true, Ordering::SeqCst);
+
         Ok(self)
     }
 
@@ -95,25 +101,34 @@ impl<D: Driver> BaseLock<D> {
     /// @returns `JoinHandle` для управления потоком обновления.
     fn background_lock_refresh(&self) -> JoinHandle<Result<(), DriverError>> {
         debug!("Инициализация потока обновления времени блокировки");
-        let interval_thread = Duration::from_secs(15);
+        let interval_thread = background_refresh_interval();
         let driver_thread = self.driver.clone();
-        let stop_thread = self.stop.clone();
+        let blocked_thread = self.blocked.clone();
         let path_thread = self.path.clone();
         thread::spawn(move || {
             let mut last = Instant::now();
+            debug!(
+                ?interval_thread,
+                ?path_thread,
+                "Поток обновления времени блокировки запущен"
+            );
             loop {
-                if stop_thread.load(Ordering::SeqCst) {
+                debug!("loop");
+                if !blocked_thread.load(Ordering::SeqCst) {
+                    debug!("Обновление времени блокировки остановлено");
                     break;
                 }
 
                 let elapsed = last.elapsed();
                 if elapsed >= interval_thread {
+                    debug!(?elapsed, "Обновление времени блокировки");
                     driver_thread.update_file_modified_time_now(&path_thread)?;
+                    debug!("123");
                     last = Instant::now(); // сброс на текущее время
                 }
 
                 // Вместо thread::sleep() — park_timeout()
-                let remaining = interval_thread - elapsed;
+                let remaining = interval_thread.saturating_sub(elapsed);
                 thread::park_timeout(remaining);
             }
 
@@ -127,19 +142,20 @@ impl<D: Driver> BaseLock<D> {
     where
         P: AsRef<Path> + Debug,
     {
-        let LockPaths { base: path, .. } = source_path.as_ref().try_into()?;
         let lock = Self {
             uuid,
             driver,
             handle: None,
-            stop: Arc::new(AtomicBool::new(false)),
-            path,
+            // Пока ещё не удалось установить блокировку.
+            // После успешного блокирования будет изменено на true.
+            blocked: Arc::new(AtomicBool::new(false)),
+            path: base_lock_path(&source_path)?,
         };
 
         // Пытаемся заблокировать файл блокировки
         let mut lock = lock.try_reserved()?;
 
-        // Поток который периодически обновляет время блокировки
+        // Поток, который периодически обновляет время блокировки
         lock.handle = Some(lock.background_lock_refresh());
 
         Ok(lock)
@@ -151,7 +167,7 @@ impl<D: Driver> BaseLock<D> {
     where
         P: AsRef<Path> + Debug,
     {
-        // Если файл существует и он не старше 30 секунд, то блокировка установлена
+        // Если файл существует и он не старше 5 минут, то блокировка установлена
         driver.exists(&path)
             && driver
                 .stat(path)
@@ -170,8 +186,14 @@ impl<D: Driver> BaseLock<D> {
 
 impl<D: Driver> Drop for BaseLock<D> {
     fn drop(&mut self) {
+        let blocked = self.blocked.load(Ordering::SeqCst);
+        if !blocked {
+            // Это может быть если блокировка не удалась
+            debug!("Поток обновления времени блокировки уже остановлен");
+            return;
+        }
         debug!("Остановка потока обновления времени блокировки");
-        self.stop.store(true, Ordering::SeqCst);
+        self.blocked.store(false, Ordering::SeqCst);
 
         debug!("Снятие блокировки");
         if let Err(err) = self.driver.rm(&self.path) {

@@ -13,9 +13,9 @@ pub use crate::{errors::DriverError, open_params::DriverParams};
 /// Режим записи файла.
 #[derive(Debug, PartialEq, Eq)]
 pub enum WriteMode {
-    FailIfExists, // Ошибка, если файл уже существует
-    Overwrite,    // Перезаписать файл, если он существует
-    Append,       // Добавить данные в конец файла
+    FailIfExist, // Ошибка, если файл уже существует
+    Overwrite,   // Перезаписать файл, если он существует
+    Append,      // Добавить данные в конец файла
 }
 
 /// Информация о файле/директории.

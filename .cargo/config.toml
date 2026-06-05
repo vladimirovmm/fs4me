@@ -1,2 +1,3 @@
 [alias]
-test-env = "test --features test_env -p fs4me-lock test_lock_timeout"
+test-env = "test --features test_env -p fs4me-lock -- test_multi_lock_background_refresh test_multi_lock_timeout test_base_lock_background_refresh"
+# test-env = "test --features test_env -p fs4me-lock -- test_multi_lock_timeout"

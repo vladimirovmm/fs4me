@@ -18,7 +18,7 @@ fn test_driver_copy_file() {
 
     let content = "Hello, World!";
     let file_src = root_path.join("src.txt");
-    let mut writer = driver.write(&file_src, WriteMode::FailIfExists).unwrap();
+    let mut writer = driver.write(&file_src, WriteMode::FailIfExist).unwrap();
     writer.write_all(content.as_bytes()).unwrap();
     drop(writer);
 
@@ -50,7 +50,7 @@ fn test_driver_copy_dir() {
 
     let content = "Hello, World!";
     let file_src = src_dir.join("src.txt");
-    let mut writer = driver.write(&file_src, WriteMode::FailIfExists).unwrap();
+    let mut writer = driver.write(&file_src, WriteMode::FailIfExist).unwrap();
     writer.write_all(content.as_bytes()).unwrap();
     drop(writer);
 
@@ -82,7 +82,7 @@ fn test_driver_copy_dir_exists() {
 
     let content = "Hello, World!";
     let file_src = src_dir.join("src.txt");
-    let mut writer = driver.write(&file_src, WriteMode::FailIfExists).unwrap();
+    let mut writer = driver.write(&file_src, WriteMode::FailIfExist).unwrap();
     writer.write_all(content.as_bytes()).unwrap();
     drop(writer);
 

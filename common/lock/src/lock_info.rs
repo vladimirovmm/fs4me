@@ -7,7 +7,6 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-use tracing::debug;
 
 use crate::{LockMode, helpers::time_expired};
 
@@ -25,13 +24,13 @@ pub(crate) struct LockInfoRead {
 /// Информация о блокировке файла.
 /// Хранит информацию о читателях, писателях и очереди на запись.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct LockInfo {
+pub struct LockInfo {
     /// Карта читателей: uuid -> unixtime блокировки
-    read: Vec<(FsUuid, Duration)>,
+    pub read: Vec<(FsUuid, Duration)>,
     /// Карта писателей: uuid -> unixtime блокировки
-    write: Option<(FsUuid, Duration)>,
+    pub write: Option<(FsUuid, Duration)>,
     /// Очередь на запись: список uuid ожидающих блокировки.
-    write_queue: VecDeque<(FsUuid, Duration)>,
+    pub write_queue: VecDeque<(FsUuid, Duration)>,
 }
 
 /// Преобразует текс в структуру `LockStat`.
@@ -43,10 +42,10 @@ pub(crate) struct LockInfo {
 /// FsUuid=unixtime=mode
 ///
 /// Пример файла:
-/// 12345_1=1620000000=read
-/// 23456_2=1620000000=read
-/// 34567_1=1620000000=write
-/// 45678_1=1620000000=write_queue
+/// 1234_1=1780118532000000000=write_queue
+/// 1234_2=1780118532000000000=write_queue
+/// 1234_3=1780118532000000000=read
+/// 1234_4=1780118532000000000=read
 impl FromStr for LockInfo {
     type Err = DriverError;
 
@@ -114,7 +113,7 @@ impl LockInfo {
         uuid: U,
         unixtime: Duration,
         mode: LockMode,
-    ) -> Result<(), ()> {
+    ) -> Result<(), String> {
         let uuid = uuid.as_ref();
 
         match mode {
@@ -122,7 +121,7 @@ impl LockInfo {
             LockMode::Read => {
                 // Заблокирован для записи или в очереди на запись
                 if self.write.is_some() || !self.write_queue.is_empty() {
-                    return Err(());
+                    return Err("Нельзя встать на запись. Есть очередь на запись".to_string());
                 }
                 // Удаляем старую запись (если есть)
                 self.remove(uuid);
@@ -146,8 +145,7 @@ impl LockInfo {
             // Устанавливаем писатель
             LockMode::Write => {
                 if !self.read.is_empty() || self.write.is_some() {
-                    debug!("Нельзя встать на запись");
-                    return Err(());
+                    return Err("Нельзя встать на запись".to_string());
                 }
 
                 // Очередь должна быть пуста и первый элемент должен совпадать с запрашиваемым uuid
@@ -156,7 +154,7 @@ impl LockInfo {
                     .front()
                     .is_some_and(|(first_uuid, _)| first_uuid != uuid)
                 {
-                    return Err(());
+                    return Err("Нельзя встать на запись".to_string());
                 }
 
                 // Убираем из очереди и устанавливаем его как писатель

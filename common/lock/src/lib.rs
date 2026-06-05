@@ -16,10 +16,12 @@ use tracing::{debug, error, instrument, warn};
 pub mod base_lock;
 pub mod helpers;
 pub(crate) mod lock_info;
+pub use crate::lock_info::LockInfo;
 
 use crate::{
-    base_lock::{BaseLock, LockPaths},
-    lock_info::{LockInfo, LockInfoRead},
+    base_lock::{BaseLock, paths::multi_lock_path},
+    helpers::background_refresh_interval,
+    lock_info::LockInfoRead,
 };
 
 /// Повторяет операции блокировки/разблокировки с экспоненциальной задержкой.
@@ -36,8 +38,17 @@ where
     let start = Instant::now();
     // Интервал между повторами
     let mut interval = Duration::from_millis(50);
+
     // Максимальное время повторений
+    // В тестовом режиме возвращаем 3 секунды
+    #[cfg(feature = "test_env")]
+    let limit_secs = Duration::from_secs(3);
+
+    // В обычном режиме возвращаем 30 сек
+    #[cfg(not(feature = "test_env"))]
     let limit_secs = Duration::from_secs(30);
+
+    debug!("============================== {:?}", limit_secs);
 
     loop {
         let result = retry_fn();
@@ -89,16 +100,6 @@ pub struct MultiLock<D: Driver> {
     refresh_handle: Option<JoinHandle<Result<(), DriverError>>>,
 }
 
-impl<D: Driver> Display for MultiLock<D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Lock - uuid: {}, path: {:?}",
-            self.uuid, self.source_path
-        )
-    }
-}
-
 impl<D: Driver> MultiLock<D> {
     /// Блокирует файл или директорию для чтения или записи.
     ///
@@ -118,7 +119,7 @@ impl<D: Driver> MultiLock<D> {
         P: AsRef<Path> + Debug,
     {
         let source_path = path.as_ref().to_path_buf();
-        let LockPaths { multi, .. } = (&source_path).try_into()?;
+        let multi = multi_lock_path(&source_path).unwrap();
         let mut lock = Self {
             lock_path: multi,
             uuid,
@@ -285,7 +286,7 @@ impl<D: Driver> MultiLock<D> {
     fn background_lock_refresh(&self) -> JoinHandle<Result<(), DriverError>> {
         debug!("Инициализация потока обновления времени блокировки");
 
-        let interval_thread = Duration::from_secs(15);
+        let interval_thread = background_refresh_interval();
         let mut lock = self.clone_from_thread();
         thread::spawn(move || {
             let mut last = Instant::now();
@@ -301,7 +302,7 @@ impl<D: Driver> MultiLock<D> {
                 }
 
                 // Вместо thread::sleep() — park_timeout()
-                let remaining = interval_thread - elapsed;
+                let remaining = interval_thread.saturating_sub(elapsed);
                 thread::park_timeout(remaining);
             }
 
@@ -352,6 +353,16 @@ impl<D: Driver> MultiLock<D> {
             stop_refresh: self.stop_refresh.clone(),
             refresh_handle: None,
         }
+    }
+}
+
+impl<D: Driver> Display for MultiLock<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Lock - uuid: {}, path: {:?}",
+            self.uuid, self.source_path
+        )
     }
 }
 
