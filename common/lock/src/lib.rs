@@ -16,11 +16,12 @@ use tracing::{debug, error, instrument, warn};
 pub mod base_lock;
 pub mod helpers;
 pub(crate) mod lock_info;
+pub use crate::lock_info::LockInfo;
 
 use crate::{
     base_lock::{BaseLock, paths::multi_lock_path},
     helpers::background_refresh_interval,
-    lock_info::{LockInfo, LockInfoRead},
+    lock_info::LockInfoRead,
 };
 
 /// Повторяет операции блокировки/разблокировки с экспоненциальной задержкой.

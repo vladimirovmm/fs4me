@@ -25,13 +25,13 @@ pub(crate) struct LockInfoRead {
 /// Информация о блокировке файла.
 /// Хранит информацию о читателях, писателях и очереди на запись.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct LockInfo {
+pub struct LockInfo {
     /// Карта читателей: uuid -> unixtime блокировки
-    read: Vec<(FsUuid, Duration)>,
+    pub read: Vec<(FsUuid, Duration)>,
     /// Карта писателей: uuid -> unixtime блокировки
-    write: Option<(FsUuid, Duration)>,
+    pub write: Option<(FsUuid, Duration)>,
     /// Очередь на запись: список uuid ожидающих блокировки.
-    write_queue: VecDeque<(FsUuid, Duration)>,
+    pub write_queue: VecDeque<(FsUuid, Duration)>,
 }
 
 /// Преобразует текс в структуру `LockStat`.
