@@ -1,8 +1,7 @@
-use fs4me_interface::{Driver, DriverError, WriteMode};
+use fs4me_interface::{Driver, DriverError};
 use fs4me_uuid::FsUuid;
 use std::{
     fmt::{Debug, Display},
-    io,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -141,12 +140,7 @@ impl<D: Driver> MultiLock<D> {
 
         debug!("Читаем файл блокировки");
         // Читаем содержимое lock файла
-        let lock_reader = self.driver.read(path, 0)?;
-        let lock_content =
-            io::read_to_string(lock_reader).map_err(|err| DriverError::ReadSeekError {
-                path: path.clone(),
-                reason: err.to_string(),
-            })?;
+        let lock_content = self.driver.read_all_string(path)?;
 
         // Парсим содержимое lock файла в структуру LockStat
         let mut lock_info = LockInfo::from_str(&lock_content)?;
@@ -174,27 +168,12 @@ impl<D: Driver> MultiLock<D> {
     /// @param lock - Информация о блокировке.
     /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке записи.
     #[instrument(level = "debug", skip(self))]
-    fn write_from_replace(&self, lock: LockInfo) -> Result<(), DriverError> {
+    fn write_lock_file(&self, lock: LockInfo) -> Result<(), DriverError> {
         let tmp_path = &self.lock_path;
 
         debug!(?self.uuid, ?tmp_path, ?lock, "Пишем во временный файл блокировки");
         // Записываем строку в lock файл
-        let mut lock_writer = self.driver.write(&tmp_path, WriteMode::Overwrite)?;
-        lock_writer
-            .write_all(lock.to_string().as_bytes())
-            .map_err(|err| DriverError::WriteError {
-                path: tmp_path.clone(),
-                reason: err.to_string(),
-            })?;
-        lock_writer.flush().map_err(|err| DriverError::WriteError {
-            path: tmp_path.to_path_buf(),
-            reason: err.to_string(),
-        })?;
-        drop(lock_writer);
-
-        debug!(
-            "После выхода из области видимости файл блокировки должен быть заменён. См. LockPath"
-        );
+        self.driver.write_all(&tmp_path, lock.to_string())?;
 
         Ok(())
     }
@@ -203,7 +182,7 @@ impl<D: Driver> MultiLock<D> {
     ///
     /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке удаления.
     #[instrument(level = "debug", skip_all)]
-    fn drop_lock(&self) -> Result<(), DriverError> {
+    fn drop_lock_file(&self) -> Result<(), DriverError> {
         debug!("Удаляем файл блокировки потому что он пустой");
         // Удаляем файл блокировки
         self.driver.rm(&self.lock_path)
@@ -217,10 +196,10 @@ impl<D: Driver> MultiLock<D> {
     fn write(&self, lock: LockInfo) -> Result<(), DriverError> {
         if lock.is_empty() {
             // Блокировок нет больше, удаляем файл блокировки
-            return self.drop_lock();
+            return self.drop_lock_file();
         }
         // Обновляем запись о блокировках
-        self.write_from_replace(lock)
+        self.write_lock_file(lock)
     }
 
     /// Пытается установить блокировку (не в режиме ожидания).
@@ -235,7 +214,6 @@ impl<D: Driver> MultiLock<D> {
         }
 
         // Создаём уникальный доступ к lock файлу
-
         let _lock = BaseLock::try_lock(self.uuid, self.driver.clone(), &self.lock_path)?;
         debug!(?self.uuid, "Установлена блокировка");
 

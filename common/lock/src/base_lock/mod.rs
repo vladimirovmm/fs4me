@@ -81,15 +81,7 @@ impl<D: Driver> BaseLock<D> {
         debug!(
             "Чтение содержимого файла блокировки, чтобы проверить принадлежность текущему клиенту"
         );
-        let mut reader = self.driver.read(&self.path, 0)?;
-        let mut content = String::new();
-        reader
-            .read_to_string(&mut content)
-            .map_err(|err| DriverError::ReadSeekError {
-                path: self.path.clone(),
-                reason: err.to_string(),
-            })?;
-
+        let content = self.driver.read_all_string(&self.path)?;
         if content.trim() != self.uuid.to_string() {
             debug!("Файл блокировки заблокирован другим клиентом");
             return Err(DriverError::LockFileBLocked(self.path.clone()));

@@ -172,6 +172,26 @@ pub trait Driver: Sized + Clone + Send + Sync + 'static {
     where
         P: AsRef<Path> + Debug;
 
+    /// Читает данные из файла в строку.
+    ///
+    /// @param path - Путь к файлу.
+    /// @return Result<String> - Результат: успешное чтение или ошибка.
+    fn read_all_string<P>(&self, path: &P) -> Result<String, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let path = path.as_ref();
+        let mut reader = self.read(&path, 0)?;
+        let mut buf = String::new();
+        reader
+            .read_to_string(&mut buf)
+            .map_err(|err| DriverError::ReadSeekError {
+                path: path.to_path_buf(),
+                reason: err.to_string(),
+            })?;
+        Ok(buf)
+    }
+
     /// Копирует файл.
     ///
     /// @param from - Путь к исходному файлу.
