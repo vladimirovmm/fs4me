@@ -12,10 +12,12 @@ use std::{
 };
 use tracing::{debug, instrument, warn};
 
-use crate::helpers::{parent_dir_mast_exists, time_expired};
+use crate::{
+    base_lock::paths::multi_lock_path,
+    helpers::{parent_dir_mast_exists, time_expired},
+};
 
 pub mod paths;
-pub use crate::base_lock::paths::LockPaths;
 
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
@@ -127,13 +129,12 @@ impl<D: Driver> BaseLock<D> {
     where
         P: AsRef<Path> + Debug,
     {
-        let LockPaths { base: path, .. } = source_path.as_ref().try_into()?;
         let lock = Self {
             uuid,
             driver,
             handle: None,
             stop: Arc::new(AtomicBool::new(false)),
-            path,
+            path: base_lock_path(&source_path)?,
         };
 
         // Пытаемся заблокировать файл блокировки

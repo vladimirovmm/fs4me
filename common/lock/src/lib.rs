@@ -18,7 +18,7 @@ pub mod helpers;
 pub(crate) mod lock_info;
 
 use crate::{
-    base_lock::{BaseLock, LockPaths},
+    base_lock::{BaseLock, paths::multi_lock_path},
     lock_info::{LockInfo, LockInfoRead},
 };
 
@@ -118,7 +118,7 @@ impl<D: Driver> MultiLock<D> {
         P: AsRef<Path> + Debug,
     {
         let source_path = path.as_ref().to_path_buf();
-        let LockPaths { multi, .. } = (&source_path).try_into()?;
+        let multi = multi_lock_path(&source_path).unwrap();
         let mut lock = Self {
             lock_path: multi,
             uuid,

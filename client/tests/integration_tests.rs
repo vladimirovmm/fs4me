@@ -1,6 +1,4 @@
-use std::path::Path;
-
-use fs4me_lock::base_lock::LockPaths;
+use fs4me_lock::base_lock::paths::multi_lock_path;
 use rand::{RngExt, distr::Alphanumeric};
 use tempfile::TempDir;
 use tracing::debug;
@@ -111,9 +109,7 @@ fn test_mv() {
     for path in [&src, &dst] {
         debug!(?path, "ищем lock-файлы в директории");
 
-        let lock_file = <&Path as TryInto<LockPaths>>::try_into(path.as_path())
-            .unwrap()
-            .multi;
+        let lock_file = multi_lock_path(path).unwrap();
         assert!(
             !fs.exists(&lock_file),
             "lock-файл не должен существовать {lock_file:?}"

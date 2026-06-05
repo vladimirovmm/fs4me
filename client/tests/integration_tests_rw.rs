@@ -1,6 +1,5 @@
 use std::{
     fs, io,
-    path::Path,
     thread::{self, sleep},
     time::Duration,
 };
@@ -11,7 +10,7 @@ use tracing_test::traced_test;
 use fs4me_client::Fs;
 use fs4me_interface::{Driver, Stat, WriteMode};
 use fs4me_local::LocalDriver;
-use fs4me_lock::base_lock::LockPaths;
+use fs4me_lock::base_lock::paths::multi_lock_path;
 
 fn err_to_string<S: ToString>(err: S) -> String {
     err.to_string()
@@ -35,9 +34,7 @@ fn tests_rw() {
     );
 
     let test_data = b"Hello, Fs4me!";
-    let lock_file = <&Path as TryInto<LockPaths>>::try_into(&file_path)
-        .unwrap()
-        .multi;
+    let lock_file = multi_lock_path(&file_path).unwrap();
 
     // Запись данных в файл
     {
@@ -206,9 +203,7 @@ fn test_parallel_read() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = <&Path as TryInto<LockPaths>>::try_into(&file_path)
-        .unwrap()
-        .multi;
+    let lock_path = multi_lock_path(&file_path).unwrap();
     let file_content = "Тестовая запись";
 
     // Создание файла с тестовым текстом
@@ -285,9 +280,7 @@ fn test_write_queue() {
     let root_path = root.path();
 
     let file_path = root_path.join("test.txt");
-    let lock_path = <&Path as TryInto<LockPaths>>::try_into(&file_path)
-        .unwrap()
-        .multi;
+    let lock_path = multi_lock_path(&file_path).unwrap();
     let count_threads = 5;
     // Создание нескольких потоков для записи одного файла
     let threads = (0..count_threads)

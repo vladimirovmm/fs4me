@@ -2,7 +2,10 @@ use fs4me_interface::Driver;
 use fs4me_local::LocalDriver;
 use fs4me_lock::{
     LockMode, MultiLock,
-    base_lock::{BaseLock, LockPaths},
+    base_lock::{
+        BaseLock,
+        paths::{base_lock_path, multi_lock_path},
+    },
 };
 use fs4me_uuid::FsUuid;
 use std::{
@@ -17,7 +20,7 @@ use tracing::info;
 use tracing_test::traced_test;
 
 fn read_lock(src: &Path) -> (String, usize) {
-    let lock_path = LockPaths::try_from(src).unwrap().multi;
+    let lock_path = multi_lock_path(src).unwrap();
     let lock_content = fs::read_to_string(&lock_path).unwrap();
     let lock_count_in_file = lock_content.lines().count();
 
@@ -193,9 +196,7 @@ fn test_base_lock() {
         source_path,
     } = Default::default();
 
-    let LockPaths {
-        base: base_path, ..
-    } = (&source_path).try_into().unwrap();
+    let base_path = base_lock_path(&source_path).unwrap();
 
     {
         let _lock = BaseLock::try_lock(uuid, driver.clone(), &source_path).unwrap();
@@ -222,7 +223,7 @@ fn test_base_lock() {
 #[test]
 #[traced_test]
 #[cfg_attr(not(feature = "test_env"), ignore)]
-fn test_lock_timeout() {
+fn test_base_lock_timeout() {
     // let Init {
     //     driver,
     //     uuid,
