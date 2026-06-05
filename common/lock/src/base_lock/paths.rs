@@ -1,8 +1,6 @@
 use fs4me_interface::DriverError;
 use std::path::{Path, PathBuf};
 
-use crate::helpers::parent_dir;
-
 /// Пути, используемые для реализации блокировки
 pub struct LockPaths {
     /// Для мультипоточной блокировки
@@ -15,7 +13,6 @@ impl TryFrom<&Path> for LockPaths {
     type Error = DriverError;
 
     fn try_from(source_path: &Path) -> Result<Self, Self::Error> {
-        let parent = parent_dir(source_path)?;
         let source_file_name = source_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -27,8 +24,8 @@ impl TryFrom<&Path> for LockPaths {
             format!(".{}.lock", source_file_name)
         };
 
-        let multi = parent.join(&lock_file_name);
-        let base = parent.join(format!("~{lock_file_name}"));
+        let multi = source_path.with_file_name(&lock_file_name);
+        let base = source_path.with_file_name(format!("~{source_file_name}"));
 
         Ok(Self { multi, base })
     }
