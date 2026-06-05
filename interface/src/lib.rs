@@ -136,6 +136,33 @@ pub trait Driver: Sized + Clone + Send + Sync + 'static {
     where
         P: AsRef<Path> + Debug;
 
+    /// Записывает данные в файл в режиме перезаписи (WriteMode::Overwrite)
+    ///
+    /// @param path - Путь к файлу.
+    /// @param data - Данные для записи.
+    /// @return Result<()> - Результат: успешная запись или ошибка.
+    fn write_all<P, D>(&self, path: &P, data: D) -> Result<(), DriverError>
+    where
+        P: AsRef<Path>,
+        D: AsRef<[u8]>,
+    {
+        let path = path.as_ref();
+        // Записываем строку в lock файл
+        let mut lock_writer = self.write(&path, WriteMode::Overwrite)?;
+
+        let data = data.as_ref();
+        lock_writer
+            .write_all(data)
+            .map_err(|err| DriverError::WriteError {
+                path: path.to_path_buf(),
+                reason: err.to_string(),
+            })?;
+        lock_writer.flush().map_err(|err| DriverError::WriteError {
+            path: path.to_path_buf(),
+            reason: err.to_string(),
+        })
+    }
+
     /// Читает данные из файла.
     ///
     /// @param path - Путь к файлу.
