@@ -8,13 +8,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::{debug, instrument, warn};
 
 use crate::{
     base_lock::paths::base_lock_path,
-    helpers::{parent_dir_mast_exists, time_expired},
+    helpers::{background_refresh_interval, parent_dir_mast_exists, time_expired},
 };
 
 pub mod paths;
@@ -101,20 +101,29 @@ impl<D: Driver> BaseLock<D> {
     /// @returns `JoinHandle` для управления потоком обновления.
     fn background_lock_refresh(&self) -> JoinHandle<Result<(), DriverError>> {
         debug!("Инициализация потока обновления времени блокировки");
-        let interval_thread = Duration::from_secs(15);
+        let interval_thread = background_refresh_interval();
         let driver_thread = self.driver.clone();
         let blocked_thread = self.blocked.clone();
         let path_thread = self.path.clone();
         thread::spawn(move || {
             let mut last = Instant::now();
+            debug!(
+                ?interval_thread,
+                ?path_thread,
+                "Поток обновления времени блокировки запущен"
+            );
             loop {
+                debug!("loop");
                 if !blocked_thread.load(Ordering::SeqCst) {
+                    debug!("Обновление времени блокировки остановлено");
                     break;
                 }
 
                 let elapsed = last.elapsed();
                 if elapsed >= interval_thread {
+                    debug!(?elapsed, "Обновление времени блокировки");
                     driver_thread.update_file_modified_time_now(&path_thread)?;
+                    debug!("123");
                     last = Instant::now(); // сброс на текущее время
                 }
 

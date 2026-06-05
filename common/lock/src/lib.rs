@@ -19,6 +19,7 @@ pub(crate) mod lock_info;
 
 use crate::{
     base_lock::{BaseLock, paths::multi_lock_path},
+    helpers::background_refresh_interval,
     lock_info::{LockInfo, LockInfoRead},
 };
 
@@ -285,7 +286,7 @@ impl<D: Driver> MultiLock<D> {
     fn background_lock_refresh(&self) -> JoinHandle<Result<(), DriverError>> {
         debug!("Инициализация потока обновления времени блокировки");
 
-        let interval_thread = Duration::from_secs(15);
+        let interval_thread = background_refresh_interval();
         let mut lock = self.clone_from_thread();
         thread::spawn(move || {
             let mut last = Instant::now();

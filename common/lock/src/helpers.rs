@@ -18,6 +18,21 @@ pub(crate) fn time_expired() -> Duration {
     }
 }
 
+/// Частота обновления блокировки в фоне
+pub(crate) fn background_refresh_interval() -> Duration {
+    #[cfg(feature = "test_env")]
+    {
+        // В тестовом режиме возвращаем 3 секунды
+        Duration::from_secs(1)
+    }
+    #[cfg(not(feature = "test_env"))]
+    {
+        // В обычном режиме возвращаем 5 минут
+
+        Duration::from_secs(15)
+    }
+}
+
 /// Возвращает родительскую директорию для указанного пути.
 ///
 /// @param path Путь к файлу/директории.
