@@ -93,7 +93,7 @@ impl<D: Driver> BaseLock<D> {
     /// Регулярно обновляет время обновления файла блокировки, поддерживая актуальность блокировки.
     ///
     /// @returns `JoinHandle` для управления потоком обновления.
-    fn update_lock_time(&self) -> JoinHandle<Result<(), DriverError>> {
+    fn background_lock_refresh(&self) -> JoinHandle<Result<(), DriverError>> {
         debug!("Инициализация потока обновления времени блокировки");
         let interval_thread = Duration::from_secs(15);
         let driver_thread = self.driver.clone();
@@ -140,7 +140,7 @@ impl<D: Driver> BaseLock<D> {
         let mut lock = lock.try_reserved()?;
 
         // Поток который периодически обновляет время блокировки
-        lock.handle = Some(lock.update_lock_time());
+        lock.handle = Some(lock.background_lock_refresh());
 
         Ok(lock)
     }
