@@ -19,18 +19,18 @@ pub use crate::base_lock::paths::LockPaths;
 
 /// Блокировка, предоставляющая эксклюзивный доступ к файлу и исключающая параллельное обращение к нему.
 #[derive(Debug)]
-pub struct BaseLock<D: Driver + 'static> {
+pub struct BaseLock<D: Driver> {
     /// Уникальный идентификатор клиента.
     /// Используется для отображения в логах.
     uuid: FsUuid,
     /// Драйвер для работы с файловой системой.
     driver: Arc<D>,
-    /// Обработчик потока, который обновляет время блокировки.
+    /// Потока который обновляет время блокировки.
     handle: Option<JoinHandle<Result<(), DriverError>>>,
-    /// Флаг, указывающий на остановку потока обновления времени блокировки.
+    /// Для остановки потока обновления времени блокировки.
     stop: Arc<AtomicBool>,
     /// Путь до файла блокировки
-    pub path: PathBuf,
+    path: PathBuf,
 }
 
 impl<D: Driver> Display for BaseLock<D> {
@@ -40,25 +40,21 @@ impl<D: Driver> Display for BaseLock<D> {
 }
 
 impl<D: Driver> BaseLock<D> {
-    /// Пытаемся создать блокировку для указанного пути и заблокировать файл блокировки.
-    #[instrument(level = "debug", skip(driver))]
-    pub fn try_lock<P>(uuid: FsUuid, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
-    where
-        P: AsRef<Path> + Debug,
-    {
-        let LockPaths { base: path, .. } = source_path.as_ref().try_into()?;
-        parent_dir_mast_exists(driver.clone(), &path)?;
+    /// Пытаемся получить блокировку для указанного пути.
+    fn try_reserved(self) -> Result<Self, DriverError> {
+        parent_dir_mast_exists(self.driver.clone(), &self.path)?;
 
-        debug!(?uuid, ?path, "Попытка создать файл блокировки");
+        debug!(?self.uuid, ?self.path, "Попытка создать файл блокировки");
 
+        // Пытаемся создать файл блокировки
         let result = || -> Result<(), DriverError> {
-            let mut writer = driver.write(&path, WriteMode::FailIfExists)?;
-            write!(writer, "{}", uuid).map_err(|err| DriverError::WriteError {
-                path: path.clone(),
+            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExists)?;
+            write!(writer, "{}", self.uuid).map_err(|err| DriverError::WriteError {
+                path: self.path.clone(),
                 reason: err.to_string(),
             })?;
             writer.flush().map_err(|err| DriverError::WriteError {
-                path: path.clone(),
+                path: self.path.clone(),
                 reason: err.to_string(),
             })?;
             Ok(())
@@ -69,41 +65,49 @@ impl<D: Driver> BaseLock<D> {
                 "Ошибка при создании файла блокировки, повторная попытка"
             );
             // Проверяем, не заблокирован ли файл
-            if Self::is_locked(driver.clone(), &path) {
+            if Self::is_locked(self.driver.clone(), &self.path) {
                 debug!("Файл заблокирован");
                 return Err(err);
             }
-            debug!("Удаление файла блокировки, если он существует");
-            // Удаляем файл блокировки, если он существует
-            driver.rm(&path)?;
-            return Self::try_lock(uuid, driver, source_path);
+            debug!("Удаление файла блокировки, потому что она не действительна");
+            // Удаляем файл блокировки, если он существует. Причина блокировки считается неактуальной.
+            // Может возникнуть ошибка, если файл уже был удален другим процессом.
+            // Тогда не повторяем, потому что кто-то уже получил блокировку.
+            self.driver.rm(&self.path)?;
+            // Пытаемся получить блокировку заново
+            return self.try_reserved();
         }
 
         debug!(
-            "Чтение содержимого файла блокировки что бы проверить пренадлежность текущему клиенту"
+            "Чтение содержимого файла блокировки, чтобы проверить принадлежность текущему клиенту"
         );
-        let mut reader = driver.read(&path, 0)?;
+        let mut reader = self.driver.read(&self.path, 0)?;
         let mut content = String::new();
         reader
             .read_to_string(&mut content)
             .map_err(|err| DriverError::ReadSeekError {
-                path: path.clone(),
+                path: self.path.clone(),
                 reason: err.to_string(),
             })?;
 
-        if content.trim() != uuid.to_string() {
-            debug!("Блокировка файла принадлежит другому клиенту");
-            return Err(DriverError::LockFileBLocked(path.clone()));
+        if content.trim() != self.uuid.to_string() {
+            debug!("Файл блокировки заблокирован другим клиентом");
+            return Err(DriverError::LockFileBLocked(self.path.clone()));
         }
 
-        debug!("Инициализация потока обновления времени блокировки");
-        let stop = Arc::new(AtomicBool::new(false));
-        let interval = Duration::from_secs(15);
+        Ok(self)
+    }
 
-        let driver_thread = driver.clone();
-        let stop_thread = stop.clone();
-        let lock_path = path.clone();
-        let handle = thread::spawn(move || {
+    /// Регулярно обновляет время обновления файла блокировки, поддерживая актуальность блокировки.
+    ///
+    /// @returns `JoinHandle` для управления потоком обновления.
+    fn update_lock_time(&self) -> JoinHandle<Result<(), DriverError>> {
+        debug!("Инициализация потока обновления времени блокировки");
+        let interval_thread = Duration::from_secs(15);
+        let driver_thread = self.driver.clone();
+        let stop_thread = self.stop.clone();
+        let path_thread = self.path.clone();
+        thread::spawn(move || {
             let mut last = Instant::now();
             loop {
                 let elapsed = last.elapsed();
@@ -111,26 +115,42 @@ impl<D: Driver> BaseLock<D> {
                 if stop_thread.load(Ordering::SeqCst) {
                     break;
                 }
-                if elapsed >= interval {
+                if elapsed >= interval_thread {
                     last = Instant::now(); // сброс на текущее время
-                    driver_thread.update_file_modified_time_now(&lock_path)?;
+                    driver_thread.update_file_modified_time_now(&path_thread)?;
                 }
 
                 // Вместо thread::sleep() — park_timeout()
-                let remaining = interval - elapsed;
+                let remaining = interval_thread - elapsed;
                 thread::park_timeout(remaining);
             }
 
-            Ok(())
-        });
+            Ok::<(), DriverError>(())
+        })
+    }
 
-        Ok(Self {
+    /// Пытаемся создать блокировку для указанного пути и заблокировать файл блокировки.
+    #[instrument(level = "debug", skip(driver))]
+    pub fn try_lock<P>(uuid: FsUuid, driver: Arc<D>, source_path: P) -> Result<Self, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let LockPaths { base: path, .. } = source_path.as_ref().try_into()?;
+        let lock = Self {
             uuid,
             driver,
-            handle: Some(handle),
-            stop,
+            handle: None,
+            stop: Arc::new(AtomicBool::new(false)),
             path,
-        })
+        };
+
+        // Пытаемся заблокировать файл блокировки
+        let mut lock = lock.try_reserved()?;
+
+        // Поток который периодически обновляет время блокировки
+        lock.handle = Some(lock.update_lock_time());
+
+        Ok(lock)
     }
 
     /// Проверка на блокировку файла
