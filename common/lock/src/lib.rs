@@ -20,31 +20,30 @@ use crate::{
     lock_info::{LockInfo, LockInfoRead},
 };
 
-/// Функция для повторения попыток блокировки и разблокировки
-/// Время на для повторения 30 секунд
+/// Повторяет операции блокировки/разблокировки с экспоненциальной задержкой.
+/// Максимальное время ожидания: 30 секунд.
 ///
-/// @param `retry_fn` - функция, которая будет повторяться.
-/// @returns результат повторений.
+/// @param retry_fn - Функция, которая будет повторяться.
+/// @returns Результат повторений.
 #[instrument(level = "debug", skip_all)]
 fn retry<F>(mut retry_fn: F) -> Result<(), DriverError>
 where
     F: FnMut() -> Result<(), DriverError>,
 {
-    // Время начала. От этого момента будет отсчитываться 30 секунд
+    // Время начала отсчета
     let start = Instant::now();
     // Интервал между повторами
     let mut interval = Duration::from_millis(50);
-    // Максимальное время для повторений. 30 секунд.
+    // Максимальное время повторений
     let limit_secs = Duration::from_secs(30);
 
     loop {
         let result = retry_fn();
         debug!(?result);
 
-        // При данных ошибках не повторять попытку
-        // Причины прекратить повторение:
-        // - При отсутствии родительской директории
-        // - Если не удалось получить имя файла
+        // Не повторяем попытки при фатальных ошибках:
+        // - Отсутствует родительская директория
+        // - Не удалось получить имя файла
         if let Err(err) = &result
             && matches!(
                 err,
@@ -59,11 +58,8 @@ where
             return result;
         }
 
-        if interval.as_secs() < 3 {
-            interval *= 2;
-        } else {
-            interval = Duration::from_secs(1);
-        }
+        // При превышении максимальной задержки используем фиксированный интервал
+        interval = interval.saturating_mul(2).min(Duration::from_secs(1));
 
         let jitter = Duration::from_millis(rand::random_range(0..250));
         sleep(interval + jitter);
@@ -72,17 +68,16 @@ where
 
 pub struct MultiLock<D: Driver> {
     /// Уникальный идентификатор клиента.
-    /// Используется для отображения в логах.
     uuid: FsUuid,
     /// Драйвер для работы с файловой системой.
     driver: Arc<D>,
-    /// Файл или директория, к которую нужно заблокировать.
+    /// Путь к блокируемому файлу или директории.
     source_path: PathBuf,
     /// Хеш содержимого блокировки.
     hash: Option<u64>,
     /// Время последнего изменения блокировки.
     modified_time: Option<Duration>,
-    /// Путь до файла блокировки
+    /// Путь до файла блокировки.
     lock_path: PathBuf,
 }
 
@@ -99,10 +94,11 @@ impl<D: Driver> Display for MultiLock<D> {
 impl<D: Driver> MultiLock<D> {
     /// Блокирует файл или директорию для чтения или записи.
     ///
-    /// @param fs - Клиент, к которой подключен драйвер.
+    /// @param uuid - Уникальный идентификатор клиента.
+    /// @param driver - Драйвер для работы с файловой системой.
     /// @param path - Путь к файлу или директории.
     /// @param mode - Режим блокировки.
-    /// @return Возвращает `Ok` с блокировкой в случае успеха, или `Err` в случае ошибки.
+    /// @returns `Ok(MultiLock)` в случае успеха, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(driver))]
     pub fn try_from<P>(
         uuid: FsUuid,
@@ -128,9 +124,11 @@ impl<D: Driver> MultiLock<D> {
         Ok(lock)
     }
 
-    /// Возвращает информацию о блокировке файла или директории.
+    /// Считывает информацию о текущей блокировке.
+    /// Удаляет устаревшие блокировки и вычисляет хеш содержимого.
     ///
-    /// @return Возвращает `Ok` с информацией о блокировке, или `Err` в случае ошибки.
+    /// @returns `Ok(LockInfoRead)` с информацией о блокировке или пустой структурой,
+    /// если файл блокировки не существует. `Err(DriverError)` при ошибке чтения.
     #[instrument(level = "debug", skip(self))]
     fn read(&self) -> Result<LockInfoRead, DriverError> {
         if !self.driver.exists(&self.lock_path) {
@@ -171,7 +169,10 @@ impl<D: Driver> MultiLock<D> {
         })
     }
 
-    /// Используется для метода write, если нужно записать новое содержимое
+    /// Записывает информацию о блокировке во временный файл.
+    ///
+    /// @param lock - Информация о блокировке.
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке записи.
     #[instrument(level = "debug", skip(self))]
     fn write_from_replace(&self, lock: LockInfo) -> Result<(), DriverError> {
         let tmp_path = &self.lock_path;
@@ -198,8 +199,9 @@ impl<D: Driver> MultiLock<D> {
         Ok(())
     }
 
-    /// Используется для метода write, если содержимое блокировки пустое.
-    /// Это означает, что все блокировки сняты, и файл блокировки больше не нужен.
+    /// Удаляет файл блокировки, так как он пустой (нет активных блокировок).
+    ///
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке удаления.
     #[instrument(level = "debug", skip_all)]
     fn drop_lock(&self) -> Result<(), DriverError> {
         debug!("Удаляем файл блокировки потому что он пустой");
@@ -207,10 +209,10 @@ impl<D: Driver> MultiLock<D> {
         self.driver.rm(&self.lock_path)
     }
 
-    /// Записывает информацию о блокировке файла или директории.
+    /// Записывает информацию о блокировке. Удаляет файл, если список блокировок пуст.
     ///
     /// @param lock - Информация о блокировке.
-    /// @return Возвращает `Ok` в случае успеха, или `Err` в случае ошибки.
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip_all)]
     fn write(&self, lock: LockInfo) -> Result<(), DriverError> {
         if lock.is_empty() {
@@ -221,10 +223,10 @@ impl<D: Driver> MultiLock<D> {
         self.write_from_replace(lock)
     }
 
-    /// Пытается блокировать файл/директорию для чтения/записи.
+    /// Пытается установить блокировку (не в режиме ожидания).
     ///
-    /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
-    /// @return Result<()> - Результат: успех или ошибка
+    /// @param mode - Режим блокировки: `Read`, `Write` или `WriteQueue`.
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` если блокировка занята.
     #[instrument(level = "debug", skip(self))]
     fn try_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         if matches!(mode, LockMode::Write) {
@@ -235,7 +237,7 @@ impl<D: Driver> MultiLock<D> {
         // Создаём уникальный доступ к lock файлу
 
         let _lock = BaseLock::try_lock(self.uuid, self.driver.clone(), &self.lock_path)?;
-        debug!(?self.uuid,"Установлена блокировка");
+        debug!(?self.uuid, "Установлена блокировка");
 
         let LockInfoRead {
             mut lock_info,
@@ -245,7 +247,7 @@ impl<D: Driver> MultiLock<D> {
         self.hash = hash;
         self.modified_time = modified_time;
 
-        debug!(?lock_info, "ДО");
+        debug!(?lock_info, "ДО блокировки");
         lock_info
             .set(self.uuid, self.driver.time()?, mode)
             .inspect_err(|err| debug!(?self.uuid, ?err))
@@ -258,9 +260,9 @@ impl<D: Driver> MultiLock<D> {
         self.write(lock_info)
     }
 
-    /// Попытка снять блокировку от имени текущего uuid.
+    /// Снимает блокировку от имени текущего uuid.
     ///
-    /// @return Result<()> - Результат: успех или ошибка
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
     fn try_unlock(&mut self) -> Result<(), DriverError> {
         // Создаём уникальный доступ к lock файлу
@@ -279,12 +281,11 @@ impl<D: Driver> MultiLock<D> {
         self.write(lock_info)
     }
 
-    /// Попытка блокировки файла/директории для чтения/записи в течение 30 секунд.
-    /// При неудаче используется стратегия Backoff
+    /// Устанавливает блокировку с повторными попытками (макс. 30 сек).
+    /// Использует стратегию экспоненциальной задержки с джиттером.
     ///
-    /// @param path - Путь к файлу или директории.
-    /// @param mode - Режим блокировки: `Read`, `Write` и `WriteQueue`.
-    /// @return Result<()> - Результат: успех или ошибка
+    /// @param mode - Режим блокировки: `Read`, `Write` или `WriteQueue`.
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
     fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
         retry(|| -> Result<(), DriverError> {
@@ -293,10 +294,10 @@ impl<D: Driver> MultiLock<D> {
         })
     }
 
-    /// Снять блокировку от имени текущего uuid.
-    /// При неудаче используется стратегия Backoff
+    /// Снимает блокировку с повторными попытками (макс. 30 сек).
+    /// Использует стратегию экспоненциальной задержки с джиттером.
     ///
-    /// @return Result<()> - Результат: успех или ошибка
+    /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
     fn retry_unlock(&mut self) -> Result<(), DriverError> {
         retry(|| -> Result<(), DriverError> { self.try_unlock() })
