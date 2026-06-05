@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
     thread::{self, sleep},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tempfile::TempDir;
 use tracing::info;
@@ -224,51 +224,39 @@ fn test_base_lock() {
 #[traced_test]
 #[cfg_attr(not(feature = "test_env"), ignore)]
 fn test_base_lock_timeout() {
-    // let Init {
-    //     driver,
-    //     uuid,
-    //     tmp: _tmp,
-    //     source_path,
-    // } = Default::default();
+    let Init {
+        driver,
+        uuid,
+        tmp: _tmp,
+        source_path,
+    } = Default::default();
 
-    // let LockPaths {
-    //     base: base_path, ..
-    // } = (&source_path).try_into().unwrap();
+    let base_path = base_lock_path(&source_path).unwrap();
 
-    // let base_lock_a = BaseLock::try_lock(uuid, driver.clone(), source_path.clone()).unwrap();
-    // info!(?base_lock_a.path, "Пишем значение файла до блокировки");
-    // fs::write(&base_lock_a.path, "null").unwrap();
+    info!(?base_path, "Имитируем уже заблокированный файл");
+    fs::write(&base_path, uuid.new_copy_id().to_string()).unwrap();
 
-    // info!("Блокируем файл");
-    // let _lock_a = base_lock_a.try_lock().unwrap();
+    info!(
+        ?base_path,
+        "Сейчас у него текущее время последнего изменения. Поэтому другие блокировки не могут быть выполнены"
+    );
 
-    // info!(?base_lock_a.tmp_path, "Пишем значение файла после блокировки");
-    // fs::write(&base_lock_a.tmp_path, "a").unwrap();
+    assert!(
+        BaseLock::try_lock(uuid, driver.clone(), source_path.clone()).is_err(),
+        "Блокировка не должна быть выполнена"
+    );
+    assert!(base_path.exists(), "Блокировочный файл должен существовать");
 
-    // // Создаём новый lock что бы были разные tmp
-    // let base_lock_b = BaseLock::try_form(uuid, driver, source_path).unwrap();
+    info!(
+        ?base_path,
+        "Устанавливаем время последней модификации -10мин от текущего"
+    );
+    let file = fs::File::open(&base_path).unwrap();
+    file.set_modified(SystemTime::now() - Duration::from_secs(600))
+        .unwrap();
 
-    // assert!(
-    //     base_lock_b.try_lock().is_err(),
-    //     "Файл должен быть заблокирован"
-    // );
+    info!(?base_path, "Время блокировки истекло");
+    BaseLock::try_lock(uuid, driver, source_path).unwrap();
 
-    // info!("Подождём, когда блокировка устареет");
-    // sleep(Duration::from_secs(5));
-
-    // info!("Попробуем установить новую блокировку");
-    // let _lock_b = base_lock_b.try_lock().unwrap();
-    // fs::write(&base_lock_b.tmp_path, "b").unwrap();
-    // drop(_lock_b);
-    // drop(_lock_a);
-
-    // info!("Ждем снятие всех блокировок");
-    // sleep(Duration::from_secs(1));
-
-    // info!(
-    //     "Проверяем что значение в файле должно быть `b` так как `a` утратило владение из-за timeout."
-    // );
-    // let content = fs::read_to_string(&base_lock_b.path).unwrap();
-
-    // assert_eq!(&content, "b");
+    info!(?base_path, "Успешно заблокировано");
 }
