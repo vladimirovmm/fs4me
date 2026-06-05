@@ -43,10 +43,10 @@ pub(crate) struct LockInfo {
 /// FsUuid=unixtime=mode
 ///
 /// Пример файла:
-/// 12345_1=1620000000=read
-/// 23456_2=1620000000=read
-/// 34567_1=1620000000=write
-/// 45678_1=1620000000=write_queue
+/// 1234_1=1780118532000000000=write_queue
+/// 1234_2=1780118532000000000=write_queue
+/// 1234_3=1780118532000000000=read
+/// 1234_4=1780118532000000000=read
 impl FromStr for LockInfo {
     type Err = DriverError;
 

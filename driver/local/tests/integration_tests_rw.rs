@@ -22,7 +22,7 @@ fn test_rw() {
 
     // Открытие для записи только если файл не существует
     {
-        let mut fopen = driver.write(&file_path, WriteMode::FailIfExists).unwrap();
+        let mut fopen = driver.write(&file_path, WriteMode::FailIfExist).unwrap();
         assert!(
             driver.exists(&file_path),
             "Файл {file_path:?} должен существовать после его открытия"
@@ -38,10 +38,10 @@ fn test_rw() {
         assert_eq!(buf, "a\n");
     }
 
-    // попытка записи в существующий файл с флагом FailIfExists запрещающий запись в существующий файл
+    // попытка записи в существующий файл с флагом FailIfExist запрещающий запись в существующий файл
     {
         assert!(
-            driver.write(&file_path, WriteMode::FailIfExists).is_err(),
+            driver.write(&file_path, WriteMode::FailIfExist).is_err(),
             "Должно быть ошибка при записи в существующий файл"
         );
     }
@@ -97,7 +97,7 @@ fn test_concurrent_read_write() {
     info!("Создание файла {file_path:?}. Только если его нет");
 
     // Отырваем файл для записи и записи
-    let mut writer = driver.write(&file_path, WriteMode::FailIfExists).unwrap();
+    let mut writer = driver.write(&file_path, WriteMode::FailIfExist).unwrap();
     writeln!(&mut writer, "hello world").unwrap();
     writer.flush().unwrap(); // Без этого файл будет пустой
 
@@ -225,7 +225,7 @@ fn test_read_write_during_rename_file() {
 
     // Открытие для записи только если файл не существует
 
-    let mut fopen = driver.write(&file_a, WriteMode::FailIfExists).unwrap();
+    let mut fopen = driver.write(&file_a, WriteMode::FailIfExist).unwrap();
     assert!(
         driver.exists(&file_a),
         "Файл {file_a:?} должен существовать после его открытия"
@@ -273,7 +273,7 @@ fn test_write_during_rename_parent() {
 
     let driver = LocalDriver::connect(DriverParams::default()).unwrap();
 
-    let mut writer = driver.write(&file_src, WriteMode::FailIfExists).unwrap();
+    let mut writer = driver.write(&file_src, WriteMode::FailIfExist).unwrap();
     write!(&mut writer, "1").unwrap();
     writer.flush().unwrap();
 
@@ -308,7 +308,7 @@ fn test_read_during_rename_file() {
     info!("Создание файла {file_a:?}. Только если его нет");
 
     // Открытие для записи только если файл не существует
-    let mut writer = driver.write(&file_a, WriteMode::FailIfExists).unwrap();
+    let mut writer = driver.write(&file_a, WriteMode::FailIfExist).unwrap();
     assert!(
         driver.exists(&file_a),
         "Файл {file_a:?} должен существовать после его открытия"

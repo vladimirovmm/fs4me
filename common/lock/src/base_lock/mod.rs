@@ -48,7 +48,7 @@ impl<D: Driver> BaseLock<D> {
 
         // Пытаемся создать файл блокировки
         let result = || -> Result<(), DriverError> {
-            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExists)?;
+            let mut writer = self.driver.write(&self.path, WriteMode::FailIfExist)?;
             write!(writer, "{}", self.uuid).map_err(|err| DriverError::WriteError {
                 path: self.path.clone(),
                 reason: err.to_string(),
@@ -151,7 +151,7 @@ impl<D: Driver> BaseLock<D> {
     where
         P: AsRef<Path> + Debug,
     {
-        // Если файл существует и он не старше 30 секунд, то блокировка установлена
+        // Если файл существует и он не старше 5 минут, то блокировка установлена
         driver.exists(&path)
             && driver
                 .stat(path)

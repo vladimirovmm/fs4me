@@ -254,7 +254,7 @@ impl Driver for LocalDriver {
 
         // Конфигурируем флаги создания в зависимости от выбранного режима
         match mode {
-            WriteMode::FailIfExists => options.create_new(true), // Не создавать, если файл есть
+            WriteMode::FailIfExist => options.create_new(true), // Не создавать, если файл есть
             WriteMode::Overwrite => options.create(true).truncate(true), // Создать и обрезать до начала
             WriteMode::Append => options.create(true).append(true), // Создать и добавлять в конец
         };
