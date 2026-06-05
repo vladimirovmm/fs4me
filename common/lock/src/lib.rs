@@ -91,16 +91,6 @@ pub struct MultiLock<D: Driver> {
     refresh_handle: Option<JoinHandle<Result<(), DriverError>>>,
 }
 
-impl<D: Driver> Display for MultiLock<D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Lock - uuid: {}, path: {:?}",
-            self.uuid, self.source_path
-        )
-    }
-}
-
 impl<D: Driver> MultiLock<D> {
     /// Блокирует файл или директорию для чтения или записи.
     ///
@@ -354,6 +344,16 @@ impl<D: Driver> MultiLock<D> {
             stop_refresh: self.stop_refresh.clone(),
             refresh_handle: None,
         }
+    }
+}
+
+impl<D: Driver> Display for MultiLock<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Lock - uuid: {}, path: {:?}",
+            self.uuid, self.source_path
+        )
     }
 }
 

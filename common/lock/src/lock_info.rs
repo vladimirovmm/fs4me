@@ -7,7 +7,6 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-use tracing::debug;
 
 use crate::{LockMode, helpers::time_expired};
 
@@ -114,7 +113,7 @@ impl LockInfo {
         uuid: U,
         unixtime: Duration,
         mode: LockMode,
-    ) -> Result<(), ()> {
+    ) -> Result<(), String> {
         let uuid = uuid.as_ref();
 
         match mode {
@@ -122,7 +121,7 @@ impl LockInfo {
             LockMode::Read => {
                 // Заблокирован для записи или в очереди на запись
                 if self.write.is_some() || !self.write_queue.is_empty() {
-                    return Err(());
+                    return Err("Нельзя встать на запись. Есть очередь на запись".to_string());
                 }
                 // Удаляем старую запись (если есть)
                 self.remove(uuid);
@@ -146,8 +145,7 @@ impl LockInfo {
             // Устанавливаем писатель
             LockMode::Write => {
                 if !self.read.is_empty() || self.write.is_some() {
-                    debug!("Нельзя встать на запись");
-                    return Err(());
+                    return Err("Нельзя встать на запись".to_string());
                 }
 
                 // Очередь должна быть пуста и первый элемент должен совпадать с запрашиваемым uuid
@@ -156,7 +154,7 @@ impl LockInfo {
                     .front()
                     .is_some_and(|(first_uuid, _)| first_uuid != uuid)
                 {
-                    return Err(());
+                    return Err("Нельзя встать на запись".to_string());
                 }
 
                 // Убираем из очереди и устанавливаем его как писатель
