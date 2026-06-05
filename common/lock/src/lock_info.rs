@@ -9,7 +9,7 @@ use std::{
 };
 use tracing::debug;
 
-use crate::LockMode;
+use crate::{LockMode, helpers::time_expired};
 
 /// Структура, содержащая информацию о блокировке файла и её статусе.
 #[derive(Debug, Default)]
@@ -206,7 +206,7 @@ impl LockInfo {
     ///
     /// @param now Текущее unixtime на сервере
     pub(crate) fn remove_stale(&mut self, now: Duration) {
-        let stale_time = now.saturating_sub(Duration::from_secs(5 * 60));
+        let stale_time = now.saturating_sub(time_expired());
         self.read.retain(|(_, unixtime)| *unixtime > stale_time);
         self.write_queue
             .retain(|(_, unixtime)| *unixtime > stale_time);

@@ -6,11 +6,12 @@ use tracing::{debug, instrument, warn};
 pub(crate) fn time_expired() -> Duration {
     #[cfg(feature = "test_env")]
     {
+        // В тестовом режиме возвращаем 3 секунды
         Duration::from_secs(3)
     }
     #[cfg(not(feature = "test_env"))]
     {
-        // В обычном режиме возвращаем 30
+        // В обычном режиме возвращаем 5 минут
 
         use std::time::Duration;
         Duration::from_mins(5)

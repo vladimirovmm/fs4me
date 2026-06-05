@@ -71,7 +71,7 @@ fn test_multi_lock() {
         .map(|num| {
             info!(?num, "===== Start =====");
 
-            let result = MultiLock::try_from(
+            let result = MultiLock::try_lock(
                 uuid.new_copy_id(),
                 driver.clone(),
                 &source_path,
@@ -104,7 +104,7 @@ fn test_multi_lock_concurrent_read_blocks_write() {
     let count = 2;
     let read_locks = (0..count)
         .map(|_| {
-            MultiLock::try_from(
+            MultiLock::try_lock(
                 uuid.new_copy_id(),
                 driver.clone(),
                 &source_path,
@@ -122,7 +122,7 @@ fn test_multi_lock_concurrent_read_blocks_write() {
     let path = source_path.clone();
     let driver_write = driver.clone();
     let write_lock = thread::spawn(move || {
-        MultiLock::try_from(uuid.new_copy_id(), driver_write, path, LockMode::Write).unwrap()
+        MultiLock::try_lock(uuid.new_copy_id(), driver_write, path, LockMode::Write).unwrap()
     });
 
     info!("Ждем пока запись встанет в очередь");
@@ -137,7 +137,7 @@ fn test_multi_lock_concurrent_read_blocks_write() {
     let path = source_path.clone();
     let driver_read = driver;
     let new_read_lock = thread::spawn(move || {
-        MultiLock::try_from(uuid.new_copy_id(), driver_read, path, LockMode::Read).unwrap()
+        MultiLock::try_lock(uuid.new_copy_id(), driver_read, path, LockMode::Read).unwrap()
     });
 
     info!("Ждем секунду, чтобы убедиться, что не появились новые читатели");

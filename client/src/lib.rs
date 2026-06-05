@@ -144,9 +144,9 @@ impl<D: Driver> Fs<D> {
         // Разблокируется автоматически по выходе из области видимости
         debug!(?from, "Блокируем");
         let _from_lock =
-            MultiLock::try_from(self.uuid, self.driver.clone(), from, LockMode::Write)?;
+            MultiLock::try_lock(self.uuid, self.driver.clone(), from, LockMode::Write)?;
         debug!(?to, "Блокируем");
-        let _to_lock = MultiLock::try_from(self.uuid, self.driver.clone(), to, LockMode::Write)?;
+        let _to_lock = MultiLock::try_lock(self.uuid, self.driver.clone(), to, LockMode::Write)?;
 
         // Перемещаем файл/директорию
         debug!("Перемещаем from->to");
@@ -207,7 +207,7 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для записи.
         // Проверка на наличие родительской директории происходит внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости.
-        let lock = MultiLock::try_from(self.uuid, self.driver.clone(), path, LockMode::Write)?;
+        let lock = MultiLock::try_lock(self.uuid, self.driver.clone(), path, LockMode::Write)?;
 
         self.driver
             .write(path, mode)
@@ -234,7 +234,7 @@ impl<D: Driver> Fs<D> {
         // Блокируем файл для чтения.
         // Проверка на наличие родительской директори происход внутри функции Lock.
         // Разблокируется автоматически по выходе из области видимости
-        let lock = MultiLock::try_from(self.uuid, self.driver.clone(), path, LockMode::Read)?;
+        let lock = MultiLock::try_lock(self.uuid, self.driver.clone(), path, LockMode::Read)?;
 
         self.driver
             .read(path, position)

@@ -136,6 +136,33 @@ pub trait Driver: Sized + Clone + Send + Sync + 'static {
     where
         P: AsRef<Path> + Debug;
 
+    /// Записывает данные в файл в режиме перезаписи (WriteMode::Overwrite)
+    ///
+    /// @param path - Путь к файлу.
+    /// @param data - Данные для записи.
+    /// @return Result<()> - Результат: успешная запись или ошибка.
+    fn write_all<P, D>(&self, path: &P, data: D) -> Result<(), DriverError>
+    where
+        P: AsRef<Path>,
+        D: AsRef<[u8]>,
+    {
+        let path = path.as_ref();
+        // Записываем строку в lock файл
+        let mut lock_writer = self.write(&path, WriteMode::Overwrite)?;
+
+        let data = data.as_ref();
+        lock_writer
+            .write_all(data)
+            .map_err(|err| DriverError::WriteError {
+                path: path.to_path_buf(),
+                reason: err.to_string(),
+            })?;
+        lock_writer.flush().map_err(|err| DriverError::WriteError {
+            path: path.to_path_buf(),
+            reason: err.to_string(),
+        })
+    }
+
     /// Читает данные из файла.
     ///
     /// @param path - Путь к файлу.
@@ -144,6 +171,26 @@ pub trait Driver: Sized + Clone + Send + Sync + 'static {
     fn read<P>(&self, path: &P, position: u64) -> Result<Box<dyn io::Read>, DriverError>
     where
         P: AsRef<Path> + Debug;
+
+    /// Читает данные из файла в строку.
+    ///
+    /// @param path - Путь к файлу.
+    /// @return Result<String> - Результат: успешное чтение или ошибка.
+    fn read_all_string<P>(&self, path: &P) -> Result<String, DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let path = path.as_ref();
+        let mut reader = self.read(&path, 0)?;
+        let mut buf = String::new();
+        reader
+            .read_to_string(&mut buf)
+            .map_err(|err| DriverError::ReadSeekError {
+                path: path.to_path_buf(),
+                reason: err.to_string(),
+            })?;
+        Ok(buf)
+    }
 
     /// Копирует файл.
     ///
