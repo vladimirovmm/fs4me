@@ -222,7 +222,6 @@ fn test_base_lock() {
 /// Тест на истечение времени блокировки, после которого следующий запрос на блокировку может быть выполнен
 #[test]
 #[traced_test]
-#[cfg_attr(not(feature = "test_env"), ignore)]
 fn test_base_lock_timeout() {
     let Init {
         driver,
@@ -259,4 +258,45 @@ fn test_base_lock_timeout() {
     BaseLock::try_lock(uuid, driver, source_path).unwrap();
 
     info!(?base_path, "Успешно заблокировано");
+}
+
+// тестирование на обновление времени блокировки в фоне
+#[test]
+#[cfg_attr(not(feature = "test_env"), ignore)]
+#[traced_test]
+fn test_base_lock_background_refresh() {
+    let Init {
+        driver,
+        uuid,
+        tmp: _tmp,
+        source_path,
+    } = Default::default();
+
+    let base_path = base_lock_path(&source_path).unwrap();
+    let modified = || -> Duration {
+        fs::metadata(&base_path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+    };
+
+    {
+        let _lock = BaseLock::try_lock(uuid, driver, source_path).unwrap();
+
+        let mut last = modified();
+        for _ in 0..5 {
+            sleep(Duration::from_secs(1));
+            assert!(base_path.exists(), "Блокировочный файл должен существовать");
+            let new_time = modified();
+            assert!(
+                last >= new_time - Duration::from_secs(3),
+                "Время блокировки должно обновляться в фоне"
+            );
+            last = new_time;
+        }
+    }
+
+    assert!(!base_path.exists(), "Должна быть снята");
 }
