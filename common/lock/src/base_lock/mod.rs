@@ -102,14 +102,14 @@ impl<D: Driver> BaseLock<D> {
         thread::spawn(move || {
             let mut last = Instant::now();
             loop {
-                let elapsed = last.elapsed();
-
                 if stop_thread.load(Ordering::SeqCst) {
                     break;
                 }
+
+                let elapsed = last.elapsed();
                 if elapsed >= interval_thread {
-                    last = Instant::now(); // сброс на текущее время
                     driver_thread.update_file_modified_time_now(&path_thread)?;
+                    last = Instant::now(); // сброс на текущее время
                 }
 
                 // Вместо thread::sleep() — park_timeout()

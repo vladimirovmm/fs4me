@@ -4,8 +4,11 @@ use std::{
     fmt::{Debug, Display},
     path::{Path, PathBuf},
     str::FromStr,
-    sync::Arc,
-    thread::sleep,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle, sleep},
     time::{Duration, Instant},
 };
 use tracing::{debug, error, instrument, warn};
@@ -78,6 +81,12 @@ pub struct MultiLock<D: Driver> {
     modified_time: Option<Duration>,
     /// Путь до файла блокировки.
     lock_path: PathBuf,
+    /// Режим блокировки.
+    mode: LockMode,
+    /// Флаг остановки потока обновления блокировки.
+    stop_refresh: Arc<AtomicBool>,
+    /// Поток обновления блокировки.
+    refresh_handle: Option<JoinHandle<Result<(), DriverError>>>,
 }
 
 impl<D: Driver> Display for MultiLock<D> {
@@ -117,9 +126,15 @@ impl<D: Driver> MultiLock<D> {
             hash: None,
             modified_time: None,
             source_path,
+            mode,
+            stop_refresh: Arc::new(AtomicBool::new(false)),
+            refresh_handle: None,
         };
 
-        lock.retry_lock(mode)?;
+        lock.retry_lock()?;
+
+        lock.refresh_handle = Some(lock.background_lock_refresh());
+
         Ok(lock)
     }
 
@@ -171,7 +186,7 @@ impl<D: Driver> MultiLock<D> {
     fn write_lock_file(&self, lock: LockInfo) -> Result<(), DriverError> {
         let tmp_path = &self.lock_path;
 
-        debug!(?self.uuid, ?tmp_path, ?lock, "Пишем во временный файл блокировки");
+        debug!(?self.uuid, ?tmp_path, ?lock, "Пишем в файл блокировки");
         // Записываем строку в lock файл
         self.driver.write_all(&tmp_path, lock.to_string())?;
 
@@ -185,7 +200,12 @@ impl<D: Driver> MultiLock<D> {
     fn drop_lock_file(&self) -> Result<(), DriverError> {
         debug!("Удаляем файл блокировки потому что он пустой");
         // Удаляем файл блокировки
-        self.driver.rm(&self.lock_path)
+        if let Err(err) = self.driver.rm(&self.lock_path) {
+            debug!(?err, "Ошибка при удалении файла блокировки");
+        }
+
+        debug!("Файл блокировки удален");
+        Ok(())
     }
 
     /// Записывает информацию о блокировке. Удаляет файл, если список блокировок пуст.
@@ -242,7 +262,7 @@ impl<D: Driver> MultiLock<D> {
     ///
     /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
-    fn try_unlock(&mut self) -> Result<(), DriverError> {
+    fn inner_try_unlock(&mut self) -> Result<(), DriverError> {
         // Создаём уникальный доступ к lock файлу
         let _lock = BaseLock::try_lock(self.uuid, self.driver.clone(), &self.lock_path)?;
 
@@ -259,16 +279,45 @@ impl<D: Driver> MultiLock<D> {
         self.write(lock_info)
     }
 
+    /// Регулярно обновляет время обновления файла блокировки, поддерживая актуальность блокировки.
+    ///
+    /// @returns `JoinHandle` для управления потоком обновления.
+    fn background_lock_refresh(&self) -> JoinHandle<Result<(), DriverError>> {
+        debug!("Инициализация потока обновления времени блокировки");
+
+        let interval_thread = Duration::from_secs(15);
+        let mut lock = self.clone_from_thread();
+        thread::spawn(move || {
+            let mut last = Instant::now();
+            loop {
+                if lock.stop_refresh.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let elapsed = last.elapsed();
+                if elapsed >= interval_thread {
+                    lock.retry_lock()?;
+                    last = Instant::now(); // сброс на текущее время
+                }
+
+                // Вместо thread::sleep() — park_timeout()
+                let remaining = interval_thread - elapsed;
+                thread::park_timeout(remaining);
+            }
+
+            Ok::<(), DriverError>(())
+        })
+    }
     /// Устанавливает блокировку с повторными попытками (макс. 30 сек).
     /// Использует стратегию экспоненциальной задержки с джиттером.
     ///
     /// @param mode - Режим блокировки: `Read`, `Write` или `WriteQueue`.
     /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
-    fn retry_lock(&mut self, mode: LockMode) -> Result<(), DriverError> {
+    fn retry_lock(&mut self) -> Result<(), DriverError> {
         retry(|| -> Result<(), DriverError> {
             // Максимальное время ожидания
-            self.inner_try_lock(mode)
+            self.inner_try_lock(self.mode)
         })
     }
 
@@ -277,15 +326,39 @@ impl<D: Driver> MultiLock<D> {
     ///
     /// @returns `Ok(())` при успехе, `Err(DriverError)` при ошибке.
     #[instrument(level = "debug", skip(self))]
-    fn inner_retry_unlock(&mut self) -> Result<(), DriverError> {
-        retry(|| -> Result<(), DriverError> { self.try_unlock() })
+    fn retry_unlock(&mut self) -> Result<(), DriverError> {
+        // Останавливаем поток обновления блокировки
+        self.stop_refresh.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.refresh_handle.take() {
+            handle.thread().unpark();
+            if let Err(e) = handle.join() {
+                error!(?e, ?self.uuid, "Ошибка при ожидании завершения автообновления блокировки");
+            }
+        }
+        // Пытаемся снять блокировку
+        retry(|| -> Result<(), DriverError> { self.inner_try_unlock() })
+    }
+
+    /// Возвращает копию структуры `MultiLock` с `refresh_handle` установленным в `None`.
+    fn clone_from_thread(&self) -> Self {
+        Self {
+            uuid: self.uuid,
+            driver: self.driver.clone(),
+            source_path: self.source_path.clone(),
+            hash: self.hash,
+            modified_time: self.modified_time,
+            lock_path: self.lock_path.clone(),
+            mode: self.mode,
+            stop_refresh: self.stop_refresh.clone(),
+            refresh_handle: None,
+        }
     }
 }
 
 impl<D: Driver> Drop for MultiLock<D> {
     fn drop(&mut self) {
-        if let Err(e) = self.inner_retry_unlock() {
-            error!("Ошибка при снятии блокировки: {e}. {self}");
+        if let Err(e) = self.retry_unlock() {
+            error!(?e, ?self.uuid, "Ошибка при снятии блокировки");
         }
     }
 }
