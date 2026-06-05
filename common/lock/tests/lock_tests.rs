@@ -6,6 +6,7 @@ use fs4me_lock::{
         BaseLock,
         paths::{base_lock_path, multi_lock_path},
     },
+    helpers::time_expired,
 };
 use fs4me_uuid::FsUuid;
 use std::{
@@ -14,7 +15,7 @@ use std::{
     str::FromStr,
     sync::Arc,
     thread::{self, sleep},
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tempfile::TempDir;
 use tracing::info;
@@ -186,7 +187,7 @@ fn test_multi_lock_concurrent_read_blocks_write() {
     );
 }
 
-// MultiLock - тестирование на обновление времени блокировки в фоне
+/// MultiLock - тестирование на обновление времени блокировки в фоне
 #[test]
 #[cfg_attr(not(feature = "test_env"), ignore)]
 #[traced_test]
@@ -233,6 +234,48 @@ fn test_multi_lock_background_refresh() {
     }
 
     assert!(!multi_path.exists(), "Должна быть снята");
+}
+
+/// тестирование на устаревание блокировки (timeout)
+#[test]
+#[traced_test]
+#[cfg_attr(not(feature = "test_env"), ignore)]
+fn test_multi_lock_timeout() {
+    let Init {
+        driver,
+        uuid,
+        tmp: _tmp,
+        source_path,
+    } = Default::default();
+
+    let multi_path = multi_lock_path(&source_path).unwrap();
+
+    info!(?multi_path, "Имитируем активную блокировку");
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + Duration::from_secs(5);
+    fs::write(&multi_path, format!("{uuid}={}=write", now.as_nanos())).unwrap();
+
+    assert!(
+        MultiLock::try_lock(
+            uuid.new_copy_id(),
+            driver.clone(),
+            &source_path,
+            LockMode::Read
+        )
+        .is_err(),
+        "Блокировка в режиме записи. Чтение не разрешено"
+    );
+
+    info!("Имитируем блокировку с timeout");
+    fs::write(
+        &multi_path,
+        format!(
+            "{uuid}={}=read",
+            now.saturating_sub(time_expired()).as_nanos()
+        ),
+    )
+    .unwrap();
+
+    MultiLock::try_lock(uuid.new_copy_id(), driver, source_path, LockMode::Read).unwrap();
 }
 
 /// Тест на блокировку при параллельном чтении
@@ -301,7 +344,7 @@ fn test_base_lock_timeout() {
         "Устанавливаем время последней модификации -10мин от текущего"
     );
     let file = fs::File::open(&base_path).unwrap();
-    file.set_modified(SystemTime::now() - Duration::from_secs(600))
+    file.set_modified(SystemTime::now() - time_expired())
         .unwrap();
 
     info!(?base_path, "Время блокировки истекло");

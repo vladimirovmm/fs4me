@@ -3,7 +3,7 @@ use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 
 /// Время ожидания (в секундах), после которого блокировка считается истекшей.
-pub(crate) fn time_expired() -> Duration {
+pub fn time_expired() -> Duration {
     #[cfg(feature = "test_env")]
     {
         // В тестовом режиме возвращаем 3 секунды
@@ -19,7 +19,7 @@ pub(crate) fn time_expired() -> Duration {
 }
 
 /// Частота обновления блокировки в фоне
-pub(crate) fn background_refresh_interval() -> Duration {
+pub fn background_refresh_interval() -> Duration {
     #[cfg(feature = "test_env")]
     {
         // В тестовом режиме возвращаем 3 секунды

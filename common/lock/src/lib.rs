@@ -38,8 +38,17 @@ where
     let start = Instant::now();
     // Интервал между повторами
     let mut interval = Duration::from_millis(50);
+
     // Максимальное время повторений
+    // В тестовом режиме возвращаем 3 секунды
+    #[cfg(feature = "test_env")]
+    let limit_secs = Duration::from_secs(3);
+
+    // В обычном режиме возвращаем 30 сек
+    #[cfg(not(feature = "test_env"))]
     let limit_secs = Duration::from_secs(30);
+
+    debug!("============================== {:?}", limit_secs);
 
     loop {
         let result = retry_fn();
