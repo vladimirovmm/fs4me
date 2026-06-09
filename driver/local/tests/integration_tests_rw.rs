@@ -28,6 +28,7 @@ fn test_rw() {
             "Файл {file_path:?} должен существовать после его открытия"
         );
         writeln!(&mut fopen, "a").unwrap();
+        writeln!(&mut fopen, "b").unwrap();
         drop(fopen);
     }
     // Тестирование чтения
@@ -35,7 +36,7 @@ fn test_rw() {
         let mut fopen = driver.read(&file_path, 0).unwrap();
         let mut buf = String::new();
         fopen.read_to_string(&mut buf).unwrap();
-        assert_eq!(buf, "a\n");
+        assert_eq!(buf, "a\nb\n");
     }
 
     // попытка записи в существующий файл с флагом FailIfExist запрещающий запись в существующий файл
@@ -49,15 +50,15 @@ fn test_rw() {
     // дозапись
     {
         let mut fopen = driver.write(&file_path, WriteMode::Append).unwrap();
-        writeln!(&mut fopen, "b").unwrap();
+        writeln!(&mut fopen, "c").unwrap();
         drop(fopen);
     }
     // тестирование чтения с указанием позиции
     {
-        let mut fopen = driver.read(&file_path, 2).unwrap();
+        let mut fopen = driver.read(&file_path, 4).unwrap();
         let mut buf = String::new();
         fopen.read_to_string(&mut buf).unwrap();
-        assert_eq!(buf, "b\n");
+        assert_eq!(buf, "c\n");
     }
 
     // тестирование перезаписи
