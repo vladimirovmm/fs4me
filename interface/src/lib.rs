@@ -73,6 +73,14 @@ impl Stat {
             Stat::Dir { modified } => *modified,
         }
     }
+
+    pub fn is_dir(&self) -> bool {
+        matches!(self, Stat::Dir { .. })
+    }
+
+    pub fn is_file(&self) -> bool {
+        matches!(self, Stat::File { .. })
+    }
 }
 
 /// Обеспечивает небезопасный доступ к файловому хранилищу. Т.е. без использования блокировок и управления одновременным доступе.

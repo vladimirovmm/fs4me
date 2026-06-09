@@ -2,26 +2,20 @@ use std::path::{Path, PathBuf};
 
 use fs4me_interface::{Driver, DriverError};
 
+pub(crate) const TRASH_DIR_NAME: &str = ".trash";
+
 /// Возвращает путь до корзины для заданного пути.
 /// Если корзина не существует, она будет создана.
 ///
 /// @param driver - Драйвер файловой системы.
 /// @param path - Путь к файлу или директории.
 /// @return Result<PathBuf, DriverError> - Результат: путь до корзины или ошибка.
-pub(crate) fn trash_dir_for<P: AsRef<Path>, D: Driver>(
-    driver: &D,
-    path: P,
-) -> Result<PathBuf, DriverError> {
+pub(crate) fn trash_dir_for<P: AsRef<Path>>(path: P) -> Result<PathBuf, DriverError> {
     let path = path.as_ref();
     let parent = path
         .parent()
         .ok_or_else(|| DriverError::ParentDirError(path.to_path_buf()))?;
-    let trash = parent.join(".trash");
-    if !driver.exists(&trash) {
-        driver.mkdir(&trash, false)?;
-    }
-
-    Ok(trash)
+    Ok(parent.join(TRASH_DIR_NAME))
 }
 
 /// Получить уникальный путь для перемещения файла или директории в корзину,
@@ -35,7 +29,7 @@ pub(crate) fn trash_unique_path<P: AsRef<Path>, D: Driver>(
     path: P,
 ) -> Result<PathBuf, DriverError> {
     let path = path.as_ref();
-    let trash = trash_dir_for(driver, path)?;
+    let trash = trash_dir_for(path)?;
 
     let file_name = path
         .file_prefix()
