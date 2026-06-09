@@ -130,7 +130,7 @@ impl<D: Driver> Fs<D> {
     /// @return Result<()> - Результат: успех или ошибка
     ///
     #[instrument(level = "debug", skip(self))]
-    pub fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    pub fn rename<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
     where
         P: AsRef<Path> + Debug,
         Q: AsRef<Path> + Debug,
@@ -164,6 +164,21 @@ impl<D: Driver> Fs<D> {
     where
         P: AsRef<Path> + Debug,
     {
+        let path = path.as_ref();
+
+        let mut parent_exist = path.to_path_buf();
+        while !self.driver.exists(&parent_exist) {
+            if !parent_exist.pop() {
+                return Err(DriverError::ParentDirError(parent_exist));
+            }
+        }
+
+        let _lock_to = MultiLock::try_lock(
+            self.uuid,
+            self.driver.clone(),
+            parent_exist,
+            LockMode::Write,
+        )?;
         self.driver.mkdir(path, recursive)
     }
 
@@ -183,7 +198,7 @@ impl<D: Driver> Fs<D> {
         // Путь, куда будет перемещён файл
         let new_path = trash_unique_path(self.driver.as_ref(), path)?;
         // Проверка блокировки происходит внутри mv
-        self.mv(path, new_path)
+        self.rename(path, new_path)
     }
 
     /// Записывает данные в файл. Есть несколько режимов записи.
@@ -234,5 +249,67 @@ impl<D: Driver> Fs<D> {
         self.driver
             .read(path, position)
             .map(|read| Box::new(DriverBufferRead { lock, read }))
+    }
+
+    /// Копирует файл.
+    ///
+    /// @param from - Путь к исходному файлу.
+    /// @param to - Путь к целевому файлу.
+    pub fn copy_file<P, Q>(&self, from: &P, to: &Q) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+        Q: AsRef<Path> + Debug,
+    {
+        let _lock_from = MultiLock::try_lock(self.uuid, self.driver.clone(), from, LockMode::Read)?;
+        let _lock_to = MultiLock::try_lock(self.uuid, self.driver.clone(), to, LockMode::Write)?;
+
+        self.driver.copy_file(from, to)
+    }
+
+    /// Копирует файл/директорию.
+    ///
+    /// @param from - Путь к исходному файлу.
+    /// @param to - Путь к целевому файлу.
+    ///
+    /// @return успех или ошибка.
+    pub fn copy<P, Q>(&self, from: &P, to: &Q) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+        Q: AsRef<Path> + Debug,
+    {
+        let from = from.as_ref();
+        let to = to.as_ref();
+
+        debug!(?from, ?to, "копируем from->to=");
+
+        if !self.exists(from) {
+            debug!(?from, "не существует");
+            return Err(DriverError::PathNotExistsError(from.to_path_buf()));
+        }
+
+        let from_stat = self.stat(from)?;
+
+        if matches!(from_stat, Stat::File { .. }) {
+            debug!(?from, "копируем файл");
+            return self.copy_file(&from.to_path_buf(), &to.to_path_buf());
+        }
+
+        let _lock_from = MultiLock::try_lock(self.uuid, self.driver.clone(), from, LockMode::Read)?;
+
+        if !self.exists(to) {
+            debug!(?to, "создаем директорию");
+            self.mkdir(to.to_path_buf(), false)?;
+        }
+
+        for from_in in self.ls(&from)? {
+            let to_in = from_in
+                .file_name()
+                .map(|n| to.join(n))
+                .ok_or_else(|| DriverError::FileNameError(from_in.clone()))?;
+
+            self.copy(&from_in, &to_in)?;
+        }
+
+        Ok(())
     }
 }

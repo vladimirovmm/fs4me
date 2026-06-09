@@ -5,7 +5,6 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-use tracing::debug;
 
 mod errors;
 mod open_params;
@@ -234,51 +233,6 @@ pub trait Driver: Sized + Clone + Send + Sync + 'static {
     where
         P: AsRef<Path> + Debug,
         Q: AsRef<Path> + Debug;
-
-    /// Копирует файл/директорию.
-    ///
-    /// @param from - Путь к исходному файлу.
-    /// @param to - Путь к целевому файлу.
-    ///
-    /// @return успех или ошибка.
-    fn copy<P, Q>(&self, from: &P, to: &Q) -> Result<(), DriverError>
-    where
-        P: AsRef<Path> + Debug,
-        Q: AsRef<Path> + Debug,
-    {
-        let from = from.as_ref();
-        let to = to.as_ref();
-
-        debug!(?from, ?to, "копируем from->to=");
-
-        if !self.exists(from) {
-            debug!(?from, "не существует");
-            return Err(DriverError::PathNotExistsError(from.to_path_buf()));
-        }
-
-        let from_stat = self.stat(from)?;
-
-        if matches!(from_stat, Stat::File { .. }) {
-            debug!(?from, "копируем файл");
-            return self.copy_file(&from.to_path_buf(), &to.to_path_buf());
-        }
-
-        if !self.exists(to) {
-            debug!(?to, "создаем директорию");
-            self.mkdir(to.to_path_buf(), false)?;
-        }
-
-        for from_in in self.ls(&from)? {
-            let to_in = from_in
-                .file_name()
-                .map(|n| to.join(n))
-                .ok_or_else(|| DriverError::FileNameError(from_in.clone()))?;
-
-            self.copy(&from_in, &to_in)?;
-        }
-
-        Ok(())
-    }
 
     /// Обновляет время последнего изменения файла на текущее.
     ///

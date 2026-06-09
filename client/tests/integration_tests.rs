@@ -80,9 +80,9 @@ fn test_mkdir() {
 /// тестирование перемещения/переименования файлов и директорий
 #[test]
 #[traced_test]
-fn test_mv() {
+fn test_rename() {
     let fs: Fs<LocalDriver> = LocalDriver::connect("").unwrap().into();
-    let root = TempDir::with_prefix("test_mv_").unwrap();
+    let root = TempDir::with_prefix("test_rename_").unwrap();
 
     let root_path = root.path();
     debug!(?root_path);
@@ -100,7 +100,7 @@ fn test_mv() {
     assert!(fs.exists(&src), "Директория src должна быть создана");
 
     debug!("Перемещение src->dst");
-    fs.mv(&src, &dst).unwrap();
+    fs.rename(&src, &dst).unwrap();
 
     assert!(fs.exists(&dst), "директория dst должна быть создана");
     assert!(!fs.exists(&src), "директория src не должна существовать");

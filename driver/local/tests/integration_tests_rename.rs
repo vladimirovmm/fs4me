@@ -11,7 +11,7 @@ use fs4me_interface::{Driver, DriverError, DriverParams};
 /// Тестирование переименования/перемещения директорий с вложенными директориями.
 #[test]
 #[traced_test]
-fn test_mv() {
+fn test_rename() {
     let tmp_dir = tempdir().unwrap();
     info!("Временная директория: {:?}", tmp_dir.path());
 
@@ -47,7 +47,7 @@ fn test_mv() {
 ///
 #[test]
 #[traced_test]
-fn test_mv_nonexistent() {
+fn test_rename_nonexistent() {
     let tmp_dir = tempdir().unwrap();
     info!("Временная директория: {:?}", tmp_dir.path());
 
@@ -84,7 +84,7 @@ fn test_mv_nonexistent() {
 /// Проверка, что перемещение происходит вместе с вложенными файлами.
 #[test]
 #[traced_test]
-fn test_mv_with_files() {
+fn test_rename_with_files() {
     let tmp_dir = tempdir().unwrap();
     info!("Временная директория: {:?}", tmp_dir.path());
 
