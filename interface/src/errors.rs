@@ -60,6 +60,9 @@ pub enum DriverError {
     #[error("Ошибка при записи в файл. Путь: {path:?}. {reason:?}")]
     WriteError { path: PathBuf, reason: String },
 
+    #[error("Недопустимый режим записи. Режим: {0:?}")]
+    InvalidWriteMode(String),
+
     #[error("Ошибка при блокировке. Путь: {path:?}. Режим: {mode:?}")]
     LockedError { path: PathBuf, mode: String },
 

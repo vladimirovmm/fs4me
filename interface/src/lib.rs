@@ -1,7 +1,8 @@
 use std::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     io,
     path::{Path, PathBuf},
+    str::FromStr,
     time::Duration,
 };
 use tracing::debug;
@@ -18,6 +19,30 @@ pub enum WriteMode {
     Append,      // Добавить данные в конец файла
 }
 
+impl WriteMode {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => WriteMode::FailIfExist,
+            1 => WriteMode::Overwrite,
+            2 => WriteMode::Append,
+            _ => panic!("invalid WriteMode value"),
+        }
+    }
+}
+
+impl FromStr for WriteMode {
+    type Err = DriverError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fail_if_exist" => Ok(WriteMode::FailIfExist),
+            "overwrite" => Ok(WriteMode::Overwrite),
+            "append" => Ok(WriteMode::Append),
+            _ => Err(DriverError::InvalidWriteMode(s.to_string())),
+        }
+    }
+}
+
 /// Информация о файле/директории.
 #[derive(Debug)]
 pub enum Stat {
@@ -31,6 +56,15 @@ pub enum Stat {
         /// Дата последнего изменения директории. Unix timestamp (UTC)
         modified: Duration,
     },
+}
+
+impl Display for Stat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stat::File { size, modified } => write!(f, "file={size}={modified:?}"),
+            Stat::Dir { modified } => write!(f, "dir={modified:?}"),
+        }
+    }
 }
 
 impl Stat {
