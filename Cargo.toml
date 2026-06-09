@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["driver/local", "client", "interface", "common/lock", "common/uuid"]
+members = ["driver/local", "client", "interface", "common/lock", "common/uuid", "common/macro"]
 
 default-members = ["client","interface"]
 
@@ -13,11 +13,12 @@ publish = false
 license = "MIT"
 
 [workspace.dependencies]
-fs4me-client.path = "./client"
-fs4me-interface.path = "./interface"
-fs4me-local.path = "./driver/local"
-fs4me-lock.path = "./common/lock"
-fs4me-uuid.path = "./common/uuid"
+fs4me-client.path = "client"
+fs4me-interface.path = "interface"
+fs4me-local.path = "driver/local"
+fs4me-lock.path = "common/lock"
+fs4me-uuid.path = "common/uuid"
+fs4me-macro.path = "common/macro"
 
 thiserror = "2.0.18"
 tempfile = "3.27.0"
@@ -26,6 +27,9 @@ chrono = "0.4.44"
 tracing = "0.1.44"
 tracing-subscriber = {version = "0.3.23", features = ["json", "env-filter"]}
 tracing-test = { version = "0.2.6", features = ["no-env-filter"] }
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
 
 [workspace.lints.clippy]
 branches_sharing_code = "warn"
