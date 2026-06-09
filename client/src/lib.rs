@@ -165,7 +165,20 @@ impl<D: Driver> Fs<D> {
         P: AsRef<Path> + Debug,
     {
         let path = path.as_ref();
-        let _lock_to = MultiLock::try_lock(self.uuid, self.driver.clone(), path, LockMode::Write)?;
+
+        let mut parent_exist = path.to_path_buf();
+        while !self.driver.exists(&parent_exist) {
+            if !parent_exist.pop() {
+                return Err(DriverError::ParentDirError(parent_exist));
+            }
+        }
+
+        let _lock_to = MultiLock::try_lock(
+            self.uuid,
+            self.driver.clone(),
+            parent_exist,
+            LockMode::Write,
+        )?;
         self.driver.mkdir(path, recursive)
     }
 
