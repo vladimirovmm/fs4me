@@ -683,6 +683,38 @@ pub fn driver_derive(input: TokenStream) -> TokenStream {
                     }
                 }
             }
+
+            /// рекурсивно очищает корзину
+            ///
+            /// # Safety
+            ///
+            /// `client` должен быть не `null` и указывать на корректный клиент.
+            /// `path` должен быть не `null` и указывать на корректный путь.
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn client_clear_trash(
+                client: *const Fs<#struct_name>,
+                path: *const c_char,
+            ) -> c_schar {
+                if client.is_null() {
+                    warn!("client is null");
+                    return -1;
+                }
+
+                let Some(path_str) = c_char_to_string(path) else {
+                    warn!("path is null");
+                    return -2;
+                };
+
+                let client = unsafe { &*client };
+
+                match client.clear_trash(&path_str) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        error!("rm error: {e}");
+                        -3
+                    }
+                }
+            }
         }
 
 

@@ -14,7 +14,7 @@ pub(crate) mod trash;
 
 use crate::{
     buffer::{DriverBufferRead, DriverBufferWrite},
-    trash::trash_unique_path,
+    trash::{TRASH_DIR_NAME, trash_dir_for, trash_unique_path},
 };
 
 /// Обёртка для драйвера для безопасного доступа к файловой системе.
@@ -194,8 +194,20 @@ impl<D: Driver> Fs<D> {
     where
         P: AsRef<Path> + Debug,
     {
+        // что удаляется
         let path = path.as_ref();
-        // Путь, куда будет перемещён файл
+        // Директория для хранения файлов в корзине
+        let trash_dir = trash_dir_for(path)?;
+
+        // Создание директории для хранения файлов в корзине
+        if !self.driver.exists(&trash_dir) {
+            self.mkdir(&trash_dir, false)?;
+        }
+        // Блокировка директории для хранения файлов в корзине на время перемещения туда удаляемого файла/директории
+        let _lock =
+            MultiLock::try_lock(self.uuid, self.driver.clone(), &trash_dir, LockMode::Write)?;
+
+        // Новый путь, куда будет перемещён файл
         let new_path = trash_unique_path(self.driver.as_ref(), path)?;
         // Проверка блокировки происходит внутри mv
         self.rename(path, new_path)
@@ -308,6 +320,64 @@ impl<D: Driver> Fs<D> {
                 .ok_or_else(|| DriverError::FileNameError(from_in.clone()))?;
 
             self.copy(&from_in, &to_in)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn trash_dirs<P>(&self, path: &P) -> impl Iterator<Item = Result<PathBuf, DriverError>>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let path = path.as_ref().to_path_buf();
+        let driver = self.driver.clone();
+        let mut stack_dirs = vec![path];
+        std::iter::from_fn(move || {
+            loop {
+                let next_dir = loop {
+                    let next = stack_dirs.pop()?;
+                    if next.file_name() == Some(TRASH_DIR_NAME.as_ref()) {
+                        continue;
+                    }
+                    debug!(?next, "Обработка пути");
+
+                    let stat = match driver.stat(&next) {
+                        Ok(stat) => stat,
+                        Err(err) => return Some(Err(err)),
+                    };
+                    if stat.is_dir() {
+                        break next;
+                    }
+                };
+
+                let entries = match driver.ls(next_dir.clone()) {
+                    Ok(ent) => ent,
+                    Err(err) => {
+                        return Some(Err(err));
+                    }
+                };
+                stack_dirs.extend(entries);
+
+                let trash_dir = next_dir.join(TRASH_DIR_NAME);
+                if self.exists(&trash_dir) {
+                    return Some(Ok(trash_dir));
+                }
+            }
+        })
+    }
+
+    /// Рекурсивная очистка корзины. Ищутся `.trash` в текущей директории и во всех вложенных директориях, и затем они удаляются навсегда.
+    ///
+    /// @param path Путь к директории, в которой нужно очистить корзину.
+    pub fn clear_trash<P>(&self, path: &P) -> Result<(), DriverError>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        for path in self.trash_dirs(path) {
+            let path = path?;
+            let _lock =
+                MultiLock::try_lock(self.uuid, self.driver.clone(), &path, LockMode::Write)?;
+            self.driver.rm(path)?;
         }
 
         Ok(())

@@ -170,6 +170,10 @@ impl DLibClient {
             'lib,
             unsafe extern "C" fn(client: *const c_void, path: *const c_char) -> c_schar,
         > = unsafe { self.lib.get(b"client_rm").unwrap() };
+        let client_clear_trash: libloading::Symbol<
+            'lib,
+            unsafe extern "C" fn(client: *const c_void, path: *const c_char) -> c_schar,
+        > = unsafe { self.lib.get(b"client_clear_trash").unwrap() };
 
         let client_copy_file: libloading::Symbol<
             'lib,
@@ -208,6 +212,7 @@ impl DLibClient {
             client_stat,
             client_rename,
             client_rm,
+            client_clear_trash,
             client_copy_file,
             client_copy,
         }
@@ -294,6 +299,10 @@ struct DLibClientFn<'lib> {
         ) -> c_schar,
     >,
     client_rm: libloading::Symbol<
+        'lib,
+        unsafe extern "C" fn(client: *const c_void, path: *const c_char) -> c_schar,
+    >,
+    client_clear_trash: libloading::Symbol<
         'lib,
         unsafe extern "C" fn(client: *const c_void, path: *const c_char) -> c_schar,
     >,
@@ -739,6 +748,7 @@ fn test_rm() {
         connect,
         disconnect,
         client_rm,
+        client_clear_trash,
         ..
     } = lib.functions();
 
@@ -751,6 +761,18 @@ fn test_rm() {
     let result = unsafe { client_rm(client, dir_path_ptr) };
     assert_eq!(result, 0);
     assert!(!dir_path.exists());
+
+    info!("Проверяем, что директория перемещена в корзину");
+    let new_dir_path = root_path.join(".trash/src");
+    assert!(new_dir_path.exists());
+
+    info!("Очищаем корзину");
+    let root_cstr_ptr = CString::new(root_path.to_string_lossy().to_string())
+        .unwrap()
+        .into_raw();
+    unsafe { client_clear_trash(client, root_cstr_ptr) };
+    assert!(!new_dir_path.exists());
+    info!("Корзина очищена");
 
     client_disconnect(disconnect, client);
 }
