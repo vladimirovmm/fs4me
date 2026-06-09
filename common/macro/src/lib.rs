@@ -545,7 +545,7 @@ pub fn driver_derive(input: TokenStream) -> TokenStream {
             /// `client` должен быть не `null` и указывать на корректный клиент.
             /// `src` и `dst` должны быть не `null` и указывать на корректные пути.
             #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn client_mv(
+            pub unsafe extern "C" fn client_rename(
                 client: *const Fs<#struct_name>,
                 src: *const c_char,
                 dst: *const c_char,
@@ -567,7 +567,7 @@ pub fn driver_derive(input: TokenStream) -> TokenStream {
 
                 let client = unsafe { &*client };
 
-                match client.mv(src_str, dst_str) {
+                match client.rename(src_str, dst_str) {
                     Ok(_) => 0,
                     Err(e) => {
                         error!("mv error: {e}");

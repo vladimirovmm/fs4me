@@ -157,14 +157,14 @@ impl DLibClient {
             ) -> *mut c_char,
         > = unsafe { self.lib.get(b"client_stat").unwrap() };
 
-        let client_mv: libloading::Symbol<
+        let client_rename: libloading::Symbol<
             'lib,
             unsafe extern "C" fn(
                 client: *const c_void,
                 src: *const c_char,
                 dst: *const c_char,
             ) -> c_schar,
-        > = unsafe { self.lib.get(b"client_mv").unwrap() };
+        > = unsafe { self.lib.get(b"client_rename").unwrap() };
 
         let client_rm: libloading::Symbol<
             'lib,
@@ -189,7 +189,7 @@ impl DLibClient {
             client_ls_next,
             client_ls_free,
             client_stat,
-            client_mv,
+            client_rename,
             client_rm,
         }
     }
@@ -266,7 +266,7 @@ struct DLibClientFn<'lib> {
             error_size: c_uint,
         ) -> *mut c_char,
     >,
-    client_mv: libloading::Symbol<
+    client_rename: libloading::Symbol<
         'lib,
         unsafe extern "C" fn(
             client: *const c_void,
@@ -648,7 +648,7 @@ fn test_ls_stat() {
 
 #[test]
 #[traced_test]
-fn test_mv() {
+fn test_rename() {
     let tmp_dir = tempdir().unwrap();
     let root_path = tmp_dir.path().canonicalize().unwrap();
     info!("Временная директория: {root_path:?}");
@@ -664,7 +664,7 @@ fn test_mv() {
     let DLibClientFn {
         connect,
         disconnect,
-        client_mv,
+        client_rename,
         ..
     } = lib.functions();
 
@@ -677,7 +677,7 @@ fn test_mv() {
         .unwrap()
         .into_raw();
     info!(?src_dir, ?dst_dir, "Перемещаем");
-    let result = unsafe { client_mv(client, src_path_str, dst_path_str) };
+    let result = unsafe { client_rename(client, src_path_str, dst_path_str) };
     assert_eq!(result, 0);
 
     assert!(dst_dir.exists());

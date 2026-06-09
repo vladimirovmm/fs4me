@@ -186,11 +186,11 @@ fn main() -> anyhow::Result<()> {
     println!("Создан: /tmp/original.txt");
 
     // Перемещаем файл
-    client.mv("/tmp/original.txt", "/tmp/moved.txt")?;
+    client.rename("/tmp/original.txt", "/tmp/moved.txt")?;
     println!("Перемещён: /tmp/original.txt → /tmp/moved.txt");
 
     // Можно переименовывать и директории
-    client.mv("/tmp/new_dir", "/tmp/renamed_dir")?;
+    client.rename("/tmp/new_dir", "/tmp/renamed_dir")?;
     println!("Переименован: /tmp/new_dir → /tmp/renamed_dir");
 
     Ok(())

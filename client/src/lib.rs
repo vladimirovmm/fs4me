@@ -130,7 +130,7 @@ impl<D: Driver> Fs<D> {
     /// @return Result<()> - Результат: успех или ошибка
     ///
     #[instrument(level = "debug", skip(self))]
-    pub fn mv<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
+    pub fn rename<P, Q>(&self, from: P, to: Q) -> Result<(), DriverError>
     where
         P: AsRef<Path> + Debug,
         Q: AsRef<Path> + Debug,
@@ -183,7 +183,7 @@ impl<D: Driver> Fs<D> {
         // Путь, куда будет перемещён файл
         let new_path = trash_unique_path(self.driver.as_ref(), path)?;
         // Проверка блокировки происходит внутри mv
-        self.mv(path, new_path)
+        self.rename(path, new_path)
     }
 
     /// Записывает данные в файл. Есть несколько режимов записи.
