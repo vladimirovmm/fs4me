@@ -3,7 +3,6 @@ use fs4me_lock::{LockMode, MultiLock};
 use fs4me_uuid::FsUuid;
 use std::{
     fmt::Debug,
-    io,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -14,7 +13,7 @@ pub mod buffer;
 pub(crate) mod trash;
 
 use crate::{
-    buffer::{DriverBufferReed, DriverBufferWrite},
+    buffer::{DriverBufferRead, DriverBufferWrite},
     trash::trash_unique_path,
 };
 
@@ -193,11 +192,11 @@ impl<D: Driver> Fs<D> {
     /// @param mode - Режим записи.
     /// @return Result<Box<dyn io::Write>> - Результат: успешная запись или ошибка.
     #[instrument(level = "debug", skip(self))]
-    pub fn write<'a, P>(
-        &'a self,
+    pub fn write<P>(
+        &self,
         path: &P,
         mode: WriteMode,
-    ) -> Result<Box<dyn io::Write + 'a>, DriverError>
+    ) -> Result<Box<DriverBufferWrite<D>>, DriverError>
     where
         P: AsRef<Path> + Debug,
     {
@@ -211,7 +210,7 @@ impl<D: Driver> Fs<D> {
 
         self.driver
             .write(path, mode)
-            .map(|write| Box::new(DriverBufferWrite { lock, write }) as Box<dyn io::Write>)
+            .map(|write| Box::new(DriverBufferWrite { lock, write }))
     }
 
     /// Читает данные из файла.
@@ -220,11 +219,7 @@ impl<D: Driver> Fs<D> {
     /// @param position - Позиция в файле, с которой начать чтение.
     /// @return Result<Box<dyn io::Read>, DriverError> - Результат: успешное чтение или ошибка.
     #[instrument(level = "debug", skip(self))]
-    pub fn read<'a, P>(
-        &'a self,
-        path: &P,
-        position: u64,
-    ) -> Result<Box<dyn io::Read + 'a>, DriverError>
+    pub fn read<P>(&self, path: &P, position: u64) -> Result<Box<DriverBufferRead<D>>, DriverError>
     where
         P: AsRef<Path> + Debug,
     {
@@ -238,6 +233,6 @@ impl<D: Driver> Fs<D> {
 
         self.driver
             .read(path, position)
-            .map(|read| Box::new(DriverBufferReed { lock, read }) as Box<dyn io::Read>)
+            .map(|read| Box::new(DriverBufferRead { lock, read }))
     }
 }

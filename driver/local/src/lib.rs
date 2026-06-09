@@ -1,8 +1,9 @@
 use fs4me_interface::{Driver, DriverError, DriverParams, Stat, WriteMode};
+use fs4me_macro::DriverFFI;
 use std::{
     fmt::Debug,
     fs::{self, File, OpenOptions},
-    io::{self, BufWriter, ErrorKind, Seek},
+    io::{self, BufWriter, ErrorKind, Read, Seek},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -11,7 +12,7 @@ use tracing::{debug, instrument, warn};
 const DRIVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DRIVER_NAME: &str = env!("CARGO_PKG_NAME");
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DriverFFI)]
 pub struct LocalDriver;
 
 impl Driver for LocalDriver {

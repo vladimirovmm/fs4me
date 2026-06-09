@@ -7,14 +7,21 @@ publish.workspace = true
 license.workspace = true
 
 [lib]
+crate-type = ["cdylib","rlib"]
 
 [dependencies]
 fs4me-interface.workspace = true
+fs4me-client.workspace = true
+fs4me-macro.workspace = true
+
 tracing.workspace = true
 
 [dev-dependencies]
 tracing-test.workspace = true
 tempfile.workspace = true
+
+ctor.workspace = true
+libloading.workspace = true
 
 [lints]
 workspace = true
