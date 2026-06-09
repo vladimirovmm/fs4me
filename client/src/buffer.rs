@@ -23,12 +23,12 @@ impl<D: Driver> Write for DriverBufferWrite<D> {
 /// Обёртка для буфера чтения, гарантирующая автоматическое снятие блокировки файла.
 /// При выходе из области видимости (например, при завершении `drop`) блокировка файла будет корректно разблокирована.
 /// Это позволяет не беспокоиться о ручном снятии блокировки файлом.
-pub struct DriverBufferReed<D: Driver> {
+pub struct DriverBufferRead<D: Driver> {
     pub lock: MultiLock<D>,
     pub read: Box<dyn Read>,
 }
 
-impl<D: Driver> Read for DriverBufferReed<D> {
+impl<D: Driver> Read for DriverBufferRead<D> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.read.read(buf)
     }
