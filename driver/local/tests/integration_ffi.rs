@@ -171,6 +171,23 @@ impl DLibClient {
             unsafe extern "C" fn(client: *const c_void, path: *const c_char) -> c_schar,
         > = unsafe { self.lib.get(b"client_rm").unwrap() };
 
+        let client_copy_file: libloading::Symbol<
+            'lib,
+            unsafe extern "C" fn(
+                client: *const c_void,
+                src: *const c_char,
+                dst: *const c_char,
+            ) -> c_schar,
+        > = unsafe { self.lib.get(b"client_copy_file").unwrap() };
+        let client_copy: libloading::Symbol<
+            'lib,
+            unsafe extern "C" fn(
+                client: *const c_void,
+                src: *const c_char,
+                dst: *const c_char,
+            ) -> c_schar,
+        > = unsafe { self.lib.get(b"client_copy").unwrap() };
+
         DLibClientFn {
             connect: client_connect,
             disconnect: client_free,
@@ -191,6 +208,8 @@ impl DLibClient {
             client_stat,
             client_rename,
             client_rm,
+            client_copy_file,
+            client_copy,
         }
     }
 }
@@ -277,6 +296,23 @@ struct DLibClientFn<'lib> {
     client_rm: libloading::Symbol<
         'lib,
         unsafe extern "C" fn(client: *const c_void, path: *const c_char) -> c_schar,
+    >,
+
+    client_copy_file: libloading::Symbol<
+        'lib,
+        unsafe extern "C" fn(
+            client: *const c_void,
+            src: *const c_char,
+            dst: *const c_char,
+        ) -> c_schar,
+    >,
+    client_copy: libloading::Symbol<
+        'lib,
+        unsafe extern "C" fn(
+            client: *const c_void,
+            src: *const c_char,
+            dst: *const c_char,
+        ) -> c_schar,
     >,
 }
 
@@ -715,6 +751,65 @@ fn test_rm() {
     let result = unsafe { client_rm(client, dir_path_ptr) };
     assert_eq!(result, 0);
     assert!(!dir_path.exists());
+
+    client_disconnect(disconnect, client);
+}
+
+#[test]
+#[traced_test]
+fn test_cp() {
+    let tmp_dir = tempdir().unwrap();
+    let root_path = tmp_dir.path().canonicalize().unwrap();
+    info!("Временная директория: {root_path:?}");
+
+    let from_dir = root_path.join("src");
+    info!(?from_dir, "Создаём директорию для копирования");
+    fs::create_dir(&from_dir).unwrap();
+
+    let file_path = from_dir.join("test.txt");
+    info!(?file_path, "Создаём файл для копирования");
+    fs::write(&file_path, "test").unwrap();
+
+    info!("Загружаем библиотеку");
+    let lib = DLibClient::new("../../target/debug/libfs4me_local.so");
+    let DLibClientFn {
+        connect,
+        disconnect,
+        client_copy_file,
+        client_copy,
+        ..
+    } = lib.functions();
+
+    let client = client_connect(connect);
+
+    let to_dir = root_path.join("dst");
+    info!(?from_dir, ?to_dir, "Рекурсивное копирование директории");
+    let from_ptr = CString::new(from_dir.to_string_lossy().to_string())
+        .unwrap()
+        .into_raw();
+    let to_ptr = CString::new(to_dir.to_string_lossy().to_string())
+        .unwrap()
+        .into_raw();
+    let result = unsafe { client_copy(client, from_ptr, to_ptr) };
+    assert_eq!(result, 0);
+    assert!(from_dir.exists());
+    assert!(to_dir.exists());
+    let to_file_path = to_dir.join("test.txt");
+    assert!(to_file_path.exists());
+
+    let from_file = to_file_path;
+    let to_file = to_dir.join("new.txt");
+    info!(?from_file, ?to_file, "Копирование файла");
+    let from_ptr = CString::new(from_file.to_string_lossy().to_string())
+        .unwrap()
+        .into_raw();
+    let to_ptr = CString::new(to_file.to_string_lossy().to_string())
+        .unwrap()
+        .into_raw();
+    let result = unsafe { client_copy_file(client, from_ptr, to_ptr) };
+    assert_eq!(result, 0);
+    assert!(from_file.exists());
+    assert!(to_file.exists());
 
     client_disconnect(disconnect, client);
 }

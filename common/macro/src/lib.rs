@@ -576,6 +576,82 @@ pub fn driver_derive(input: TokenStream) -> TokenStream {
                 }
             }
 
+            /// Копирование файла
+            ///
+            /// # Safety
+            ///
+            /// `client` должен быть не `null` и указывать на корректный клиент.
+            /// `src` и `dst` должны быть не `null` и указывать на корректные пути.
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn client_copy_file(
+                client: *const Fs<#struct_name>,
+                src: *const c_char,
+                dst: *const c_char,
+            ) -> c_schar {
+                if client.is_null() {
+                    error!("client is null");
+                    return -1;
+                }
+
+                let Some(src_str) = c_char_to_string(src) else {
+                    error!("src is null");
+                    return -2;
+                };
+
+                let Some(dst_str) = c_char_to_string(dst) else {
+                    error!("dst is null");
+                    return -3;
+                };
+
+                let client = unsafe { &*client };
+
+                match client.copy_file(&src_str, &dst_str) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        error!("copy error: {e}");
+                        -4
+                    }
+                }
+            }
+
+            /// Копирование файла и директорий с рекурсией.
+            ///
+            /// # Safety
+            ///
+            /// `client` должен быть не `null` и указывать на корректный клиент.
+            /// `src` и `dst` должны быть не `null` и указывать на корректные пути.
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn client_copy(
+                client: *const Fs<#struct_name>,
+                src: *const c_char,
+                dst: *const c_char,
+            ) -> c_schar {
+                if client.is_null() {
+                    error!("client is null");
+                    return -1;
+                }
+
+                let Some(src_str) = c_char_to_string(src) else {
+                    error!("src is null");
+                    return -2;
+                };
+
+                let Some(dst_str) = c_char_to_string(dst) else {
+                    error!("dst is null");
+                    return -3;
+                };
+
+                let client = unsafe { &*client };
+
+                match client.copy(&src_str, &dst_str) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        error!("copy error: {e}");
+                        -4
+                    }
+                }
+            }
+
             /// Удаляет директорию или файл
             ///
             /// # Safety
