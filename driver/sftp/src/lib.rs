@@ -330,10 +330,16 @@ impl Driver for SftpDriver {
     {
         let path = path.as_ref();
         match self.stat(path)? {
-            Stat::Dir { .. } => self.sftp.rmdir(path).map_err(|err| DriverError::RmError {
-                path: path.to_path_buf(),
-                reason: err.to_string(),
-            }),
+            Stat::Dir { .. } => {
+                for entry in self.ls(path)? {
+                    self.rm(entry)?;
+                }
+                //
+                self.sftp.rmdir(path).map_err(|err| DriverError::RmError {
+                    path: path.to_path_buf(),
+                    reason: err.to_string(),
+                })
+            }
             Stat::File { .. } => self.sftp.unlink(path).map_err(|err| DriverError::RmError {
                 path: path.to_path_buf(),
                 reason: err.to_string(),
