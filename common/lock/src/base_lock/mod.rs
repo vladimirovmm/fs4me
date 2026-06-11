@@ -175,7 +175,7 @@ impl<D: Driver> BaseLock<D> {
                 .map(|modified| {
                     let time_exp = time_expired();
                     let expired = modified + time_exp;
-                    let now = driver.time().unwrap_or_default();
+                    let now = driver.server_time().unwrap_or_default();
 
                     debug!(?modified, ?time_exp, ?expired, ?now);
                     expired >= now

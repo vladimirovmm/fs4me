@@ -87,7 +87,7 @@ impl<D: Driver> Fs<D> {
     /// @return Возвращает `Ok` с текущим временем сервера в формате Unix timestamp, или `Err` в случае ошибки.
     #[instrument(level = "debug", skip(self))]
     pub fn time(&self) -> Result<Duration, DriverError> {
-        self.driver.time()
+        self.driver.server_time()
     }
 
     /// Проверяет существование файла или директории.

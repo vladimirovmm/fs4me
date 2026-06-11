@@ -21,7 +21,7 @@ fn test_driver_info() {
 #[traced_test]
 fn test_time() {
     let driver = LocalDriver::connect(DriverParams::default()).unwrap();
-    let server_time = driver.time().unwrap();
+    let server_time = driver.server_time().unwrap();
     info!("Server time: {server_time:?}");
     let local_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
