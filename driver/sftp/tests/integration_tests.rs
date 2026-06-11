@@ -1,21 +1,12 @@
-use std::path::PathBuf;
-
-use base64::{Engine, prelude::BASE64_STANDARD};
 use fs4me_interface::Driver;
 use fs4me_sftp::SftpDriver;
-use fs4me_test_infra::{SSH_KEY_PRIVATE, SSH_PASSWORD, SSH_USER, up_ssh};
+use fs4me_test_infra::{SSH_PASSWORD, SSH_USER, up_ssh};
 use tracing::info;
 use tracing_test::traced_test;
 
-fn params_with_key(port: u16) -> String {
-    format!(
-        "host=localhost\n\
-        port={port}\n\
-        username={SSH_USER}\n\
-        private_key=\"{key}\"",
-        key = BASE64_STANDARD.encode(SSH_KEY_PRIVATE)
-    )
-}
+use crate::init::{connect, params_with_key};
+
+mod init;
 
 /// Авторизация по паролю
 #[tokio::test]
@@ -46,8 +37,7 @@ async fn test_base_connect_by_key() {
 #[traced_test]
 #[cfg_attr(not(feature = "test_with_docker"), ignore)]
 async fn test_driver_info() {
-    let ssh_server = up_ssh().await.unwrap();
-    let driver = SftpDriver::connect(params_with_key(ssh_server.port)).unwrap();
+    let (_ssh_server, driver, _root) = connect().await;
 
     let name = driver.name();
     info!("Name: {name}");
@@ -61,8 +51,7 @@ async fn test_driver_info() {
 #[traced_test]
 #[cfg_attr(not(feature = "test_with_docker"), ignore)]
 async fn test_time() {
-    let ssh_server = up_ssh().await.unwrap();
-    let driver = SftpDriver::connect(params_with_key(ssh_server.port)).unwrap();
+    let (_ssh_server, driver, _root) = connect().await;
 
     let server_time = driver.server_time().unwrap();
     info!("Server time: {server_time:?}");
@@ -79,17 +68,7 @@ async fn test_time() {
 #[traced_test]
 #[cfg_attr(not(feature = "test_with_docker"), ignore)]
 async fn test_work_with_directory() {
-    let ssh_server = up_ssh().await.unwrap();
-    let driver = SftpDriver::connect(params_with_key(ssh_server.port)).unwrap();
-
-    let home = PathBuf::from(format!("/home/{SSH_USER}"));
-    let root = home.join("tmp");
-    driver.mkdir(&root, false).unwrap();
-    assert!(
-        driver.exists(&root),
-        "Директория {root:?} должна существовать"
-    );
-    info!("корневая директория: {root:?}");
+    let (_ssh_server, driver, root) = connect().await;
 
     let a = root.join("a");
     let a1 = a.join("a1");
