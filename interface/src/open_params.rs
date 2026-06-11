@@ -2,11 +2,20 @@ use std::{
     collections::HashMap,
     ffi::CString,
     fmt::{Debug, Display},
+    ops::Deref,
 };
 
 /// Параметры для подключения к хранилищу файлов.
 #[derive(Default, Debug)]
 pub struct DriverParams(pub HashMap<String, String>);
+
+impl Deref for DriverParams {
+    type Target = HashMap<String, String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Разбор строки в формате `KEY=VALUE\nKEY=VALUE` в параметры подключения.
 impl From<&str> for DriverParams {
@@ -16,7 +25,15 @@ impl From<&str> for DriverParams {
             .map(|line| line.trim())
             .filter(|line| !line.is_empty())
             .filter_map(|line: &str| line.split_once("="))
-            .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
+            .map(|(key, value)| {
+                let value = value.trim();
+                let value = if value.starts_with('"') {
+                    value.trim_matches('"').to_string()
+                } else {
+                    value.trim().to_string()
+                };
+                (key.trim().to_string(), value)
+            })
             .collect::<HashMap<_, _>>();
         DriverParams(params)
     }
