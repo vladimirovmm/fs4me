@@ -4,7 +4,7 @@ use fs4me_macro::DriverFFI;
 use ssh2::{ErrorCode, OpenFlags, OpenType, Session, Sftp};
 use std::{
     fmt::{Debug, Display},
-    io::{self, BufWriter, Read, Seek},
+    io::{self, BufWriter, Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime},
@@ -387,16 +387,15 @@ impl Driver for SftpDriver {
     {
         let path = path.as_ref();
 
-        let flags = match mode {
-            WriteMode::FailIfExist => OpenFlags::EXCLUSIVE,
-            WriteMode::Overwrite => OpenFlags::CREATE | OpenFlags::TRUNCATE,
-            WriteMode::Append => OpenFlags::CREATE | OpenFlags::APPEND,
+        debug!(?path, "Открытие файла");
+        let flag = match mode {
+            WriteMode::FailIfExist => OpenFlags::WRITE | OpenFlags::EXCLUSIVE,
+            WriteMode::Overwrite => OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+            WriteMode::Append => OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::APPEND,
         };
-
-        debug!("Открытие файла");
         let file = self
             .sftp
-            .open_mode(path, flags, 0o755, OpenType::File)
+            .open_mode(path, flag, 0o755, OpenType::File)
             .map_err(|err| DriverError::FopenError {
                 path: path.to_path_buf(),
                 reason: err.to_string(),
