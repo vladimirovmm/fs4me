@@ -22,6 +22,16 @@ pub struct SftpDriver {
     time_offset: i64,
 }
 
+impl SftpDriver {
+    fn to_local_time(&self, server_time: Duration) -> Duration {
+        to_local_time(server_time, self.time_offset)
+    }
+
+    fn to_server_time(&self, local_time: Duration) -> Duration {
+        to_server_time(local_time, self.time_offset)
+    }
+}
+
 impl Driver for SftpDriver {
     /// Возвращает название драйвера.
     fn name(&self) -> &str {
@@ -181,8 +191,8 @@ impl Driver for SftpDriver {
                     .map_err(|err| DriverError::DriverError {
                         reason: format!("Ошибка при парсинге времени: {err}"),
                     })?;
-            let time_offset = now() - server_unix_time;
-            debug!("Разница во времени: {time_offset}");
+            let time_offset = now().as_secs() as i64 - server_unix_time;
+            debug!("Разница во времени: {time_offset:?}");
             ssh_channel
                 .wait_close()
                 .map_err(|err| DriverError::DriverError {
@@ -209,11 +219,8 @@ impl Driver for SftpDriver {
     }
 
     /// Возвращает текущее время сервера.
-    fn time(&self) -> Result<Duration, DriverError> {
-        // Для SFTP можно получить время через stat на текущую директорию
-        // но это не обязательно будет время сервера. Оставляем текущее время клиента.
-        let unix_time = now() + self.time_offset;
-        Ok(Duration::from_secs(unix_time as u64))
+    fn server_time(&self) -> Result<Duration, DriverError> {
+        Ok(self.to_server_time(now()))
     }
 
     /// Проверяет, существует ли путь.
@@ -233,14 +240,18 @@ impl Driver for SftpDriver {
         self.sftp
             .stat(path)
             .map(|stat| {
+                let modified = stat
+                    .mtime
+                    .map(Duration::from_secs)
+                    .map(|time| self.to_local_time(time))
+                    .unwrap_or_default();
+
                 if stat.is_dir() {
-                    Stat::Dir {
-                        modified: Duration::from_secs(stat.mtime.unwrap_or_default()),
-                    }
+                    Stat::Dir { modified }
                 } else {
                     Stat::File {
                         size: stat.size.unwrap_or_default(),
-                        modified: Duration::from_secs(stat.mtime.unwrap_or_default()),
+                        modified,
                     }
                 }
             })
@@ -430,7 +441,7 @@ impl Driver for SftpDriver {
             path: path.to_path_buf(),
             reason: format!("Ошибка при получении статистики: {e}"),
         })?;
-        stat.mtime = Some(self.time()?.as_secs());
+        stat.mtime = Some(self.server_time()?.as_secs());
         self.sftp
             .setstat(path, stat)
             .map_err(|e| DriverError::LastModifiedError {
@@ -440,9 +451,39 @@ impl Driver for SftpDriver {
     }
 }
 
-fn now() -> i64 {
+fn now() -> Duration {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64
+}
+
+fn to_local_time(server_time: Duration, time_offset: i64) -> Duration {
+    if time_offset == 0 {
+        server_time
+    } else if time_offset < 0 {
+        server_time + Duration::from_secs(time_offset.unsigned_abs())
+    } else {
+        server_time - Duration::from_secs(time_offset as u64)
+    }
+}
+
+fn to_server_time(local_time: Duration, time_offset: i64) -> Duration {
+    if time_offset == 0 {
+        local_time
+    } else if time_offset < 0 {
+        local_time - Duration::from_secs(time_offset.unsigned_abs())
+    } else {
+        local_time + Duration::from_secs(time_offset as u64)
+    }
+}
+
+#[test]
+fn test_convert_time() {
+    let local_time = now();
+    let server_time = local_time + Duration::from_secs(3 * 60);
+
+    assert_eq!(to_server_time(server_time, 0), server_time);
+    assert_eq!(to_server_time(local_time, 3 * 60), server_time);
+    assert_eq!(to_local_time(server_time, 0), server_time);
+    assert_eq!(to_local_time(server_time, 3 * 60), local_time);
 }

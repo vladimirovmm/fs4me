@@ -40,7 +40,8 @@ tokio = {version="1.52.3", features = ["macros"]}
 anyhow = "1.0.102"
 futures-util = "0.3.32"
 tar = "0.4.46"
-bytes = "*"
+bytes = "1.11.1"
+base64="0.22.1"
 
 [workspace.lints.clippy]
 branches_sharing_code = "warn"

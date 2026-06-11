@@ -16,7 +16,7 @@ fs4me-macro.workspace = true
 
 tracing.workspace = true
 ssh2.workspace = true
-base64="0.22.1"
+base64.workspace = true
 
 [dev-dependencies]
 fs4me-test-infra.workspace = true
