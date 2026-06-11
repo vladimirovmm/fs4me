@@ -257,12 +257,12 @@ dependencies = [
 name = "fs4me-sftp"
 version = "0.2.0"
 dependencies = [
+ "base64",
  "fs4me-client",
  "fs4me-interface",
  "fs4me-macro",
  "fs4me-test-infra",
  "libloading",
- "once_cell",
  "ssh2",
  "tokio",
  "tracing",

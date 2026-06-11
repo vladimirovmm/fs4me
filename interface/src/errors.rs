@@ -4,6 +4,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Clone)]
 pub enum DriverError {
+    #[error("Ошибка при подключении. {reason:?}")]
+    ConnectError { reason: String },
+
     #[error("Ошибка при получения полного пути {path:?}. {reason:?}")]
     PathResolutionError { path: PathBuf, reason: String },
 
@@ -93,4 +96,7 @@ pub enum DriverError {
 
     #[error("Ошибка при обновлении времени последнего изменения файла. Путь: {path:?}. {reason:?}")]
     UpdateFileModifiedTimeError { path: PathBuf, reason: String },
+
+    #[error("Ошибка при работе драйвера. {reason:?}")]
+    DriverError { reason: String },
 }
