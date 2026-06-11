@@ -4,6 +4,7 @@ use tracing_test::traced_test;
 use crate::init::connect;
 
 mod init;
+
 /// Тестирование переименования/перемещения директорий с вложенными директориями.
 #[tokio::test]
 #[traced_test]
