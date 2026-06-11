@@ -44,7 +44,7 @@ fn dockerfile_content() -> String {
     DOCKERFILE_TEMPLATE
         .replace("{{USER}}", SSH_USER)
         .replace("{{PASSWORD}}", SSH_PASSWORD)
-        .replace("{{PUB_KEY}}", SSH_KEY_PUBLIC)
+        .replace("{{PUB_KEY}}", SSH_KEY_PUBLIC.trim())
 }
 
 /// Создаём Dockerfile для SSH‑сервера и упаковываем его в tar‑архив
@@ -54,6 +54,8 @@ fn dockerfile_content() -> String {
 /// Возвращает содержимое архива в виде байтового вектора.
 fn dockerfile_tar() -> Result<Vec<u8>> {
     let dockerfile_contents = dockerfile_content();
+    println!("{}", dockerfile_contents);
+
     // Создаём tar‑архив с Dockerfile
     let mut tar = tar::Builder::new(Vec::new());
     {
@@ -91,7 +93,8 @@ async fn create_image(docker: &Docker) -> Result<()> {
         .rm(true)
         .build();
 
-    // Получаем поток событий сборки (без await!)
+    // Получаем поток событий сборки
+    debug!("Сборка Docker‑образа");
     let mut image_stream = docker.build_image(build_options, None, Some(body_stream(stream)));
 
     // Итерируем по потоку событий
