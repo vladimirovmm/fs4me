@@ -8,8 +8,8 @@ use bollard::{
 };
 use futures_util::StreamExt;
 use rand::{RngExt, distr::Alphanumeric};
-use std::{collections::HashMap, process::Command, time::Duration};
-use tokio::{net::TcpStream, time::timeout};
+use std::{collections::HashMap, process::Command, thread::sleep, time::Duration};
+use tokio::{io::AsyncReadExt, net::TcpStream, time::timeout};
 use tracing::debug;
 use tracing_test::traced_test;
 
@@ -215,23 +215,7 @@ pub async fn up_ssh() -> Result<SshServer> {
         .collect::<String>();
     let name = format!("{CONTAINER_NAME}_{}", suffix);
     let server = create_ssh_container(&docker, &name).await?;
-
-    let port = server.port;
-    timeout(Duration::from_secs(30), async {
-        loop {
-            let result = timeout(
-                Duration::from_secs(5),
-                TcpStream::connect(format!("127.0.0.1:{}", port)),
-            )
-            .await;
-            match result {
-                Ok(_) => break,
-                Err(_) => continue,
-            }
-        }
-    })
-    .await
-    .context("SSH-сервер не запустился")?;
+    server.is_ready().await?;
 
     Ok(server)
 }
@@ -266,7 +250,7 @@ pub async fn stop_ssh(name: &str) -> Result<()> {
 /// Структура, представляющая SSH-сервер, который автоматически останавливается при уничтожении.
 pub struct SshServer {
     name: String,
-    port: u16,
+    pub port: u16,
 }
 impl Drop for SshServer {
     fn drop(&mut self) {
@@ -313,6 +297,54 @@ impl Drop for SshServer {
             Err(err) => {
                 println!("Ошибка остановки контейнера {name}: {err}");
             }
+        }
+    }
+}
+
+impl SshServer {
+    pub async fn is_ready(&self) -> Result<bool> {
+        let port = self.port;
+
+        timeout(Duration::from_secs(30), async {
+            loop {
+                match Self::check_ssh_banner("127.0.0.1", port).await {
+                    Ok(true) => return Ok(true), // Сервер готов
+                    Ok(false) => {
+                        // Баннер не найден — ждём перед повторной попыткой
+                        sleep(Duration::from_millis(500));
+                        continue;
+                    }
+                    Err(e) => {
+                        eprintln!("Ошибка проверки SSH-сервера: {}", e);
+                        sleep(Duration::from_millis(500));
+                        continue;
+                    }
+                }
+            }
+        })
+        .await
+        .context("SSH-сервер не запустился в течение 30 секунд")
+        .flatten()
+    }
+
+    async fn check_ssh_banner(host: &str, port: u16) -> Result<bool> {
+        match TcpStream::connect(format!("{}:{}", host, port)).await {
+            Ok(mut stream) => {
+                let mut buffer = [0; 1024];
+                match timeout(Duration::from_secs(5), stream.read(&mut buffer)).await {
+                    Ok(Ok(n)) => {
+                        let banner = String::from_utf8_lossy(&buffer[..n]);
+                        if banner.starts_with("SSH-") {
+                            Ok(true)
+                        } else {
+                            eprintln!("Получен не-SSH баннер: '{}'", banner);
+                            Ok(false)
+                        }
+                    }
+                    Err(_) | Ok(Err(_)) => Ok(false),
+                }
+            }
+            Err(e) => Err(e.into()),
         }
     }
 }
