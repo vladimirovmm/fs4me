@@ -220,11 +220,9 @@ dependencies = [
 name = "fs4me-local"
 version = "0.2.0"
 dependencies = [
- "ctor",
  "fs4me-client",
  "fs4me-interface",
  "fs4me-macro",
- "libloading",
  "tempfile",
  "tracing",
  "tracing-test",
@@ -247,10 +245,14 @@ dependencies = [
 name = "fs4me-macro"
 version = "0.2.0"
 dependencies = [
+ "ctor",
+ "libloading",
  "proc-macro2",
  "quote",
  "syn",
+ "tempfile",
  "tracing",
+ "tracing-test",
 ]
 
 [[package]]
