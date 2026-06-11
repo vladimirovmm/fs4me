@@ -1,7 +1,7 @@
 use base64::{Engine, prelude::BASE64_STANDARD};
 use fs4me_interface::{Driver, DriverError, DriverParams, Stat, WriteMode};
 use fs4me_macro::DriverFFI;
-use ssh2::{OpenFlags, OpenType, Session, Sftp};
+use ssh2::{ErrorCode, OpenFlags, OpenType, Session, Sftp};
 use std::{
     fmt::{Debug, Display},
     io::{self, BufWriter, Read, Seek},
@@ -284,13 +284,17 @@ impl Driver for SftpDriver {
     {
         let from = from.as_ref();
         let to = to.as_ref();
-        self.sftp
-            .rename(from, to, None)
-            .map_err(|err| DriverError::MvError {
+
+        self.sftp.rename(from, to, None).map_err(|err| {
+            if err.code() == ErrorCode::SFTP(2) {
+                return DriverError::PathExistsError(to.to_path_buf());
+            }
+            DriverError::MvError {
                 from: from.to_path_buf(),
                 to: to.to_path_buf(),
-                reason: err.to_string(),
-            })
+                reason: format!("`to` exists: {}. {err}", self.exists(to)),
+            }
+        })
     }
 
     /// Создает директорию.
