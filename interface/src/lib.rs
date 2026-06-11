@@ -113,7 +113,7 @@ pub trait Driver: Sized + Clone + Send + Sync + 'static {
     /// Возвращает время сервера в формате Unix timestamp.
     ///
     /// @return Result<u32> - Результат: Unix timestamp в секундах
-    fn time(&self) -> Result<Duration, DriverError>;
+    fn server_time(&self) -> Result<Duration, DriverError>;
 
     /// Проверяет существование файла или директории.
     ///

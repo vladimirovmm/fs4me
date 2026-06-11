@@ -1,14 +1,44 @@
-use fs4me_local::LocalDriver;
-use tempfile::tempdir;
+use fs4me_interface::Driver;
+use fs4me_sftp::SftpDriver;
+use fs4me_test_infra::{SSH_PASSWORD, SSH_USER, up_ssh};
 use tracing::info;
 use tracing_test::traced_test;
 
-use fs4me_interface::{Driver, DriverParams};
+use crate::init::{connect, params_with_key};
 
-#[test]
+mod init;
+
+/// Авторизация по паролю
+#[tokio::test]
 #[traced_test]
-fn test_driver_info() {
-    let driver = LocalDriver::connect(DriverParams::default()).unwrap();
+#[cfg_attr(not(feature = "test_with_docker"), ignore)]
+async fn test_base_connect_by_password() {
+    let ssh_server = up_ssh().await.unwrap();
+    let _driver = SftpDriver::connect(format!(
+        "host=localhost\n\
+        port={}\n\
+        username={SSH_USER}\n\
+        password={SSH_PASSWORD}",
+        ssh_server.port,
+    ))
+    .unwrap();
+}
+
+/// Авторизация по ключу
+#[tokio::test]
+#[traced_test]
+#[cfg_attr(not(feature = "test_with_docker"), ignore)]
+async fn test_base_connect_by_key() {
+    let ssh_server = up_ssh().await.unwrap();
+    let _driver = SftpDriver::connect(params_with_key(ssh_server.port)).unwrap();
+}
+
+#[tokio::test]
+#[traced_test]
+#[cfg_attr(not(feature = "test_with_docker"), ignore)]
+async fn test_driver_info() {
+    let (_ssh_server, driver, _root) = connect().await;
+
     let name = driver.name();
     info!("Name: {name}");
     let version = driver.version();
@@ -17,67 +47,36 @@ fn test_driver_info() {
     assert!(!version.is_empty());
 }
 
-#[test]
+#[tokio::test]
 #[traced_test]
-fn test_time() {
-    let driver = LocalDriver::connect(DriverParams::default()).unwrap();
+#[cfg_attr(not(feature = "test_with_docker"), ignore)]
+async fn test_time() {
+    let (_ssh_server, driver, _root) = connect().await;
+
     let server_time = driver.server_time().unwrap();
     info!("Server time: {server_time:?}");
     let local_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    info!("Local time: {local_time}");
+        .unwrap();
+    info!("Local time: {local_time:?}");
+    assert!(local_time.as_secs() - server_time.as_secs() <= 1); // 1 секунда погрешности на стыке времени
 }
 
-#[test]
-#[traced_test]
-fn test_ls() {
-    let tmp_dir = tempdir().unwrap();
-    let root_path = tmp_dir.path();
-    let dir_0 = root_path.join("0");
-
-    info!("Временная директория: {root_path:?}");
-
-    let driver = LocalDriver::connect(DriverParams::default()).unwrap();
-
-    let mut iter = driver.ls(root_path).unwrap();
-    assert!(iter.next().is_none(), "Директория должна быть пустой");
-    assert!(!driver.exists(&dir_0), "Директория не должна существовать");
-
-    // Создание директорий
-    for dir_name in 0..10 {
-        let dir_path = root_path.join(dir_name.to_string());
-        driver.mkdir(dir_path, false).unwrap();
-    }
-
-    let files = driver.ls(root_path).unwrap().collect::<Vec<_>>();
-    assert_eq!(files.len(), 10, "Должно быть 10 директорий");
-
-    assert!(driver.exists(&dir_0), "Директория должна существовать");
-
-    driver.rm(&dir_0).unwrap();
-    assert!(!driver.exists(&dir_0), "Директория должна быть удалена");
-}
-
-/// Тестирование работы LocalDriver с директориями.
+/// Тестирование работы с директориями.
 /// Проверяет создание, удаление, перечисление и проверку существования директорий.
-#[test]
+#[tokio::test]
 #[traced_test]
-fn test_work_with_directory() {
-    let tmp_dir = tempdir().unwrap();
-    info!("Временная директория: {:?}", tmp_dir.path());
+#[cfg_attr(not(feature = "test_with_docker"), ignore)]
+async fn test_work_with_directory() {
+    let (_ssh_server, driver, root) = connect().await;
 
-    let driver = LocalDriver::connect(DriverParams::default()).unwrap();
-
-    let root = tmp_dir.path();
     let a = root.join("a");
     let a1 = a.join("a1");
     let a2 = a1.join("a2");
 
     // Проверка начального состояния
     assert!(
-        driver.ls(root).unwrap().next().is_none(),
+        driver.ls(&root).unwrap().next().is_none(),
         "Директория должна быть пустой"
     );
     assert!(
@@ -103,7 +102,7 @@ fn test_work_with_directory() {
     }
 
     assert_eq!(
-        driver.ls(root).unwrap().count(),
+        driver.ls(&root).unwrap().count(),
         4,
         "В корне должно быть 4 директории: a, b, c, d"
     );

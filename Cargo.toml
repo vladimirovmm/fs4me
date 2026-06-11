@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["driver/local", "client", "interface", "common/lock", "common/uuid", "common/macro"]
+members = ["driver/local", "driver/sftp", "client", "interface", "common/lock", "common/uuid", "common/macro", "common/test_infra"]
 
 default-members = ["client","interface"]
 
@@ -16,14 +16,16 @@ license = "MIT"
 fs4me-client.path = "client"
 fs4me-interface.path = "interface"
 fs4me-local.path = "driver/local"
+fs4me-sftp.path = "driver/sftp"
 fs4me-lock.path = "common/lock"
 fs4me-uuid.path = "common/uuid"
 fs4me-macro.path = "common/macro"
+fs4me-test-infra.path = "common/test_infra"
 
 thiserror = "2.0.18"
 tempfile = "3.27.0"
 rand="0.10.1"
-chrono = "0.4.44"
+chrono = "0.4.45"
 tracing = "0.1.44"
 tracing-subscriber = {version = "0.3.23", features = ["json", "env-filter"]}
 tracing-test = { version = "0.2.6", features = ["no-env-filter"] }
@@ -32,6 +34,14 @@ quote = "1"
 proc-macro2 = "1"
 ctor = "1.0.7"
 libloading = "0.9.0"
+ssh2 = "0.9.5"
+bollard = "0.21.0"
+tokio = {version="1.52.3", features = ["macros"]}
+anyhow = "1.0.102"
+futures-util = "0.3.32"
+tar = "0.4.46"
+bytes = "1.11.1"
+base64="0.22.1"
 
 [workspace.lints.clippy]
 branches_sharing_code = "warn"

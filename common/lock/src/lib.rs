@@ -161,7 +161,7 @@ impl<D: Driver> MultiLock<D> {
         // Парсим содержимое lock файла в структуру LockStat
         let mut lock_info = LockInfo::from_str(&lock_content)?;
         // Удаляем устаревшие блокировки (unixtime + 5 минут < now)
-        lock_info.remove_stale(self.driver.time()?);
+        lock_info.remove_stale(self.driver.server_time()?);
 
         // Вычисляем хеш содержимого lock файла
         let hash = Some(lock_info.get_hash());
@@ -248,7 +248,7 @@ impl<D: Driver> MultiLock<D> {
 
         debug!(?lock_info, "ДО блокировки");
         lock_info
-            .set(self.uuid, self.driver.time()?, mode)
+            .set(self.uuid, self.driver.server_time()?, mode)
             .inspect_err(|err| debug!(?self.uuid, ?err))
             .map_err(|_| DriverError::LockedError {
                 path: self.source_path.clone(),

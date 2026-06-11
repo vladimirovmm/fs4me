@@ -1,5 +1,5 @@
 [package]
-name = "fs4me-local"
+name = "fs4me-sftp"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,7 +7,7 @@ publish.workspace = true
 license.workspace = true
 
 [lib]
-crate-type = ["cdylib","rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 fs4me-interface.workspace = true
@@ -15,10 +15,18 @@ fs4me-client.workspace = true
 fs4me-macro.workspace = true
 
 tracing.workspace = true
+ssh2.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
+fs4me-test-infra.workspace = true
+
 tracing-test.workspace = true
-tempfile.workspace = true
+libloading.workspace = true
+tokio.workspace = true
+
+[features]
+test_with_docker = []
 
 [lints]
 workspace = true

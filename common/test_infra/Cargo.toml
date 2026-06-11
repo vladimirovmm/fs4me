@@ -1,24 +1,24 @@
 [package]
-name = "fs4me-local"
+name = "fs4me-test-infra"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 publish.workspace = true
 license.workspace = true
 
-[lib]
-crate-type = ["cdylib","rlib"]
-
 [dependencies]
-fs4me-interface.workspace = true
-fs4me-client.workspace = true
-fs4me-macro.workspace = true
-
 tracing.workspace = true
-
-[dev-dependencies]
 tracing-test.workspace = true
-tempfile.workspace = true
+rand.workspace = true
+bollard.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+futures-util.workspace = true
+tar.workspace = true
+bytes.workspace = true
+
+[features]
+test_with_docker = []
 
 [lints]
 workspace = true
