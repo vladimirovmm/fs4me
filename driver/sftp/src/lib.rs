@@ -303,7 +303,7 @@ impl Driver for SftpDriver {
         if !recursive {
             return self
                 .sftp
-                .mkdir(path, 0x775)
+                .mkdir(path, 0o755)
                 .map_err(|err| DriverError::MkdirError {
                     path: path.to_path_buf(),
                     reason: err.to_string(),
@@ -314,6 +314,7 @@ impl Driver for SftpDriver {
         for component in path.components() {
             current_dir.push(component);
 
+            debug!(?current_dir, "mkdir: проверяем существование директории");
             if self.exists(&current_dir) {
                 continue;
             }
@@ -385,7 +386,7 @@ impl Driver for SftpDriver {
         debug!("Открытие файла");
         let file = self
             .sftp
-            .open_mode(path, flags, 0x775, OpenType::File)
+            .open_mode(path, flags, 0o755, OpenType::File)
             .map_err(|err| DriverError::FopenError {
                 path: path.to_path_buf(),
                 reason: err.to_string(),
