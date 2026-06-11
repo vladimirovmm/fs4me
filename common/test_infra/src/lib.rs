@@ -354,6 +354,7 @@ impl SshServer {
 
 #[tokio::test]
 #[traced_test]
+#[cfg_attr(not(feature = "test_with_docker"), ignore)]
 async fn test_ssh() {
     let _server = up_ssh().await.unwrap();
 }

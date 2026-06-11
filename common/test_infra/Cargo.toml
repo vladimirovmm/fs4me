@@ -17,5 +17,8 @@ futures-util.workspace = true
 tar.workspace = true
 bytes.workspace = true
 
+[features]
+test_with_docker = []
+
 [lints]
 workspace = true
